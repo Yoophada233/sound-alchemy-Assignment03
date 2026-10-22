@@ -12,6 +12,15 @@ from pathlib import Path
 SAMPLE_RATE = 22050
 SECONDS = 4
 SEED = 7
+RAIN_MODEL = "minecraft-reference-v4"
+# Fitted to the band powers of the user's reference BV1Pe411x7JY (60–90 s).
+# These are filter coefficients, not samples copied from the recording.
+RAIN_LOW_ALPHA = 0.1871169673
+RAIN_UPPER_ALPHA = 0.7808628791
+RAIN_FILTERS = (
+    (0.8985127978, -1.7970255955, 0.8985127978, -1.7966554257, 0.7973957653),
+    (0.9450501546, -1.2872928586, 0.5838864135, -1.2872928586, 0.5289365681),
+)
 HEADROOM = 0.25
 PITCHES = (110.0, 123.4708, 130.8128, 146.8324, 164.8138, 195.9977, 220.0)
 NOTE_NAMES = ("A2", "B2", "C3", "D3", "E3", "G3", "A3")
@@ -52,7 +61,8 @@ class Mix:
     def settings(self):
         return {"levels": self.levels.copy(), "character": self.character.copy(),
                 "enabled": self.enabled.copy(), "master": self.master,
-                "sample_rate": SAMPLE_RATE, "loop_seconds": SECONDS, "seed": SEED}
+                "sample_rate": SAMPLE_RATE, "loop_seconds": SECONDS, "seed": SEED,
+                "rain_model": RAIN_MODEL}
 
 
 def validate(mix):
@@ -75,25 +85,72 @@ def fade_edges(samples):
     return samples
 
 
+def rain_envelope(rng):
+    """A small strength change in the rain texture, without a pitched impact."""
+    count = round(rng.uniform(0.035, 0.09) * SAMPLE_RATE)
+    samples = []
+    for i in range(count):
+        position = i / (count - 1)
+        envelope = 16 * position ** 2 * (1 - position) ** 2
+        samples.append(envelope)
+    return samples
+
+
+def filter_rain(samples, coefficients):
+    """A small equalizer: the previous two inputs/outputs shape the next sample."""
+    b0, b1, b2, a1, a2 = coefficients
+    x1 = x2 = y1 = y2 = 0.0
+    result = []
+    for value in samples:
+        output = b0 * value + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2
+        result.append(output)
+        x2, x1 = x1, value
+        y2, y1 = y1, output
+    return result
+
+
 def make_rain(density):
-    """Seeded noise under short, scattered droplet envelopes."""
-    rng = random.Random(SEED)
+    """Shape seeded noise using the measured reference, then vary rain density."""
+    if not math.isfinite(density) or not 0 <= density <= 1:
+        raise ValueError("Rain density must be between zero and one.")
     count = SAMPLE_RATE * SECONDS
-    samples = [rng.uniform(-0.12, 0.12) for _ in range(count)]
-    # Neighbour averaging makes a soft background instead of a bright hiss.
-    for i in range(1, count):
-        samples[i] = 0.7 * samples[i - 1] + 0.3 * samples[i]
-    for _ in range(12 + round(density * 80)):
-        start = rng.randrange(count)
-        frequency = rng.uniform(650, 1600)
-        duration = rng.uniform(0.025, 0.075)
-        strength = rng.uniform(0.14, 0.36)
-        for j in range(round(duration * SAMPLE_RATE)):
-            t = j / SAMPLE_RATE
-            envelope = min(1, t / 0.002) * math.exp(-t * 85)
-            value = math.sin(2 * math.pi * frequency * t) * strength * envelope
-            samples[(start + j) % count] += value
-    return fade_edges([max(-1, min(1, value)) for value in samples])
+    rng = random.Random(SEED)
+    # Match the reference's broad spectral balance before adding strength changes.
+    samples = []
+    low = upper = 0.0
+    for _ in range(count):
+        white = rng.gauss(0, 1)
+        low += RAIN_LOW_ALPHA * (white - low)
+        upper += RAIN_UPPER_ALPHA * (low - upper)
+        samples.append(upper)
+    for coefficients in RAIN_FILTERS:
+        samples = filter_rain(samples, coefficients)
+
+    motion = random.Random(SEED + 11)
+    knots = [motion.uniform(0.82, 1.18) for _ in range(16)]
+    strength = []
+    for i in range(count):
+        position = i * len(knots) / count
+        segment = int(position)
+        fraction = position - segment
+        blend = fraction * fraction * (3 - 2 * fraction)
+        drift = knots[segment] * (1 - blend) + knots[(segment + 1) % len(knots)] * blend
+        strength.append(drift)
+
+    shapes = random.Random(SEED + 1)
+    grains = [rain_envelope(shapes) for _ in range(16)]
+    positions = random.Random(SEED + 2)
+    drops = 12 + round(density * 80)
+    for _ in range(drops):
+        start = positions.randrange(count)
+        grain = positions.choice(grains)
+        amount = positions.uniform(0.06, 0.16)
+        for j, value in enumerate(grain):
+            strength[(start + j) % count] += value * amount
+    samples = [value * gain for value, gain in zip(samples, strength)]
+    rms = math.sqrt(sum(value * value for value in samples) / count)
+    gain = (0.045 + density * 0.03) / rms
+    return fade_edges([value * gain for value in samples])
 
 
 def make_bass(pitch):

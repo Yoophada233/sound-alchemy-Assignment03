@@ -6,12 +6,13 @@
 
 import json
 import math
+import statistics
 import time
 import unittest
 import wave
 from pathlib import Path
 
-from sound import (HEADROOM, Mix, PRESETS, SAMPLE_RATE, SECONDS, make_bass,
+from sound import (HEADROOM, Mix, PRESETS, SAMPLE_RATE, SECONDS, make_bass, make_rain,
                    pcm_bytes, render_mix, save_mix)
 
 HERE = Path(__file__).resolve().parent
@@ -55,6 +56,35 @@ class SoundTests(unittest.TestCase):
         def crossings(samples):
             return sum(a <= 0 < b for a, b in zip(samples[:-1], samples[1:]))
         self.assertAlmostEqual(crossings(high) / crossings(low), 2, delta=0.03)
+
+    def test_rain_is_repeatable_and_density_changes_its_energy(self):
+        light = make_rain(0)
+        heavy = make_rain(1)
+        self.assertEqual(light, make_rain(0))
+        self.assertEqual(len(light), SAMPLE_RATE * SECONDS)
+        self.assertNotEqual(light, heavy)
+        light_energy = sum(v * v for v in light) / len(light)
+        heavy_energy = sum(v * v for v in heavy) / len(heavy)
+        self.assertGreater(heavy_energy, light_energy * 1.5)
+        for samples in (light, heavy):
+            self.assertEqual((samples[0], samples[-1]), (0, 0))
+            self.assertLess(max(map(abs, samples)), 0.8)
+            self.assertLess(abs(sum(samples) / len(samples)), 0.005)
+
+    def test_rain_rejects_invalid_density(self):
+        for value in (-0.1, 1.1, float("nan"), float("inf")):
+            with self.assertRaises(ValueError):
+                make_rain(value)
+
+    def test_soft_rain_does_not_have_dominant_knocking_peaks(self):
+        for density in (0, 0.62, 1):
+            samples = make_rain(density)
+            rms = math.sqrt(sum(value * value for value in samples) / len(samples))
+            size = round(0.05 * SAMPLE_RATE)
+            windows = [math.sqrt(sum(value * value for value in samples[i:i + size]) / size)
+                       for i in range(size, len(samples) - size, size)]
+            self.assertLess(max(map(abs, samples)) / rms, 6)
+            self.assertLess(max(windows) / statistics.median(windows), 2)
 
     def test_full_controls_stay_finite_with_headroom(self):
         mix = Mix()

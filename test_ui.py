@@ -226,6 +226,137 @@ class InteractionTests(unittest.TestCase):
         self.click(("play", 0))
         self.assertTrue(self.lab.playing)
 
+    def test_adjusting_sound_discovers_a_garden_without_requiring_play(self):
+        self.assertFalse(self.lab.garden.discovered)
+        key, rect = self.lab.sliders[0]
+        self.lab.move_slider(key, (rect.left + rect.width * 0.8, rect.centery))
+        self.assertIn("rainy-moss", self.lab.garden.discovered)
+        self.assertIn("Discovered", self.lab.message)
+        self.assertFalse(self.lab.playing)
+        self.assertTrue(list(self.lab.garden.folder.glob("collection-*.json")))
+
+    def test_master_volume_does_not_unlock_or_change_a_garden(self):
+        from garden import scene_for
+        before = scene_for(self.lab.mix)
+        rect = next(rect for key, rect in self.lab.sliders if key == ("master", 0))
+        self.lab.move_slider(("master", 0), (rect.left, rect.centery))
+        self.assertEqual(scene_for(self.lab.mix), before)
+        self.assertFalse(self.lab.garden.discovered)
+
+    def test_name_entry_keeps_a_restorable_card_and_blocks_global_shortcuts(self):
+        from garden import Garden
+        expected = self.lab.mix.settings()
+        self.click(("keep", 0))
+        self.lab.draw()
+        self.lab.event(pygame.event.Event(pygame.TEXTINPUT, text="Sea of light"))
+        self.lab.event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_s))
+        self.lab.event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_SPACE))
+        self.assertIsNone(self.lab.last_saved)
+        self.assertFalse(self.lab.playing)
+        self.lab.event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_RETURN))
+        self.assertFalse(self.lab.naming)
+        card = self.lab.garden.cards[0]
+        self.assertEqual(card["name"], "Sea of light")
+        self.assertEqual(Garden(self.lab.garden.folder).restore(card["id"]).settings(), expected)
+        self.lab.choose_preset("Night orbit")
+        self.lab.draw()
+        self.click(("restore", card["id"]))
+        self.assertEqual(self.lab.mix.settings(), expected)
+        self.assertFalse(self.lab.playing)
+
+    def test_empty_name_can_be_fixed_and_escape_does_not_create_a_card(self):
+        self.click(("keep", 0))
+        self.lab.event(pygame.event.Event(pygame.TEXTINPUT, text="   "))
+        self.lab.event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_RETURN))
+        self.assertTrue(self.lab.naming)
+        self.assertTrue(self.lab.name_error)
+        self.assertFalse(self.lab.garden.cards)
+        self.lab.event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE))
+        self.assertFalse(self.lab.naming)
+        self.assertFalse(self.lab.garden.cards)
+
+    def test_ime_composition_does_not_save_before_the_name_is_committed(self):
+        self.click(("keep", 0))
+        name = "\u96e8\u4e2d\u82b1\u56ed"
+        self.lab.event(pygame.event.Event(pygame.TEXTEDITING, text="yu", start=0, length=2))
+        self.lab.event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_RETURN))
+        self.assertTrue(self.lab.naming)
+        self.assertFalse(self.lab.garden.cards)
+        self.lab.event(pygame.event.Event(pygame.TEXTINPUT, text=name))
+        self.lab.draw()
+        self.lab.event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_RETURN))
+        self.assertEqual(self.lab.garden.cards[0]["name"], name)
+
+    def test_optional_wish_accept_share_next_and_no_duplicate_completion(self):
+        self.assertIsNone(self.lab.active_wish)
+        self.click(("wish", 0))
+        self.assertEqual(self.lab.active_wish, "a-soft-rain")
+        self.lab.draw()
+        self.click(("wish", 0))
+        self.assertIn("a-soft-rain", self.lab.garden.completed)
+        self.lab.draw()
+        self.assertNotIn(("wish", 0), self.lab.buttons)
+        self.click(("next_wish", 0))
+        self.lab.draw()
+        self.click(("wish", 0))
+        self.lab.draw()
+        self.click(("wish", 0))
+        self.assertEqual(len(self.lab.garden.completed), 1)
+        self.assertIn("Keep exploring", self.lab.message)
+        self.lab.choose_preset("Night orbit")
+        self.click(("wish", 0))
+        self.assertIn("roots-at-night", self.lab.garden.completed)
+
+    def test_save_failure_keeps_session_card_and_user_can_retry(self):
+        self.click(("keep", 0))
+        with patch.object(self.lab.garden, "persist", side_effect=PermissionError("test: no write")):
+            self.lab.event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_RETURN))
+        self.assertFalse(self.lab.naming)
+        self.assertEqual(len(self.lab.garden.cards), 1)
+        self.assertIn("session only", self.lab.message)
+        self.assertTrue(self.lab.persist_garden())
+        self.assertTrue(list(self.lab.garden.folder.glob("collection-*.json")))
+
+    def test_reset_keeps_collection_and_silent_ingredients_cannot_be_kept(self):
+        self.lab.begin_keep()
+        self.lab.finish_keep()
+        card = self.lab.garden.cards[0]
+        self.lab.reset()
+        self.assertEqual(self.lab.garden.cards[0], card)
+        self.assertIn("rainy-moss", self.lab.garden.discovered)
+        self.lab.mix.enabled = [False] * 3
+        self.lab.begin_keep()
+        self.assertFalse(self.lab.naming)
+        self.assertIn("Add a little", self.lab.message)
+
+    def test_collection_pages_keep_earlier_cards_accessible(self):
+        for index in range(5):
+            self.lab.begin_keep()
+            self.lab.garden_name = f"Garden {index}"
+            self.lab.finish_keep()
+        self.lab.draw()
+        self.assertEqual(self.lab.card_page, 1)
+        self.click(("page", -1))
+        self.lab.draw()
+        first = self.lab.garden.cards[0]
+        self.assertIn(("restore", first["id"]), self.lab.buttons)
+        self.assertNotIn(("page", -1), self.lab.buttons)
+
+    def test_visual_feedback_changes_with_ingredients_and_ignores_master(self):
+        from garden_view import draw_garden
+        surface = pygame.Surface((748, 310))
+        draw_garden(surface, surface.get_rect(), self.lab.mix, 1.0)
+        original = pygame.image.tobytes(surface, "RGB")
+        self.lab.mix.master = 0
+        draw_garden(surface, surface.get_rect(), self.lab.mix, 1.0)
+        self.assertEqual(original, pygame.image.tobytes(surface, "RGB"))
+        self.lab.mix.enabled = [False] * 3
+        draw_garden(surface, surface.get_rect(), self.lab.mix, 1.0)
+        bare = pygame.image.tobytes(surface, "RGB")
+        self.assertNotEqual(original, bare)
+        draw_garden(surface, surface.get_rect(), self.lab.mix, 2.0)
+        self.assertEqual(bare, pygame.image.tobytes(surface, "RGB"))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
