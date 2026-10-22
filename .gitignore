@@ -1,0 +1,8 @@
+.uv-cache/
+.python/
+.venv/
+.backups/
+__pycache__/
+out/
+!out/.gitkeep
+

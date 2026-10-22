@@ -1,0 +1,232 @@
+# /// script
+# requires-python = ">=3.10,<3.14"
+# dependencies = ["pygame==2.6.1"]
+# ///
+"""Exercise the real event handlers with silent SDL devices; no person is simulated."""
+
+import os
+import time
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+os.environ["SDL_VIDEODRIVER"] = "dummy"
+os.environ["SDL_AUDIODRIVER"] = "dummy"
+os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "1"
+
+import pygame
+from app import Lab
+from sound import mix_layers, pcm_bytes
+
+HERE = Path(__file__).resolve().parent
+
+
+class InteractionTests(unittest.TestCase):
+    def setUp(self):
+        self.folder = HERE / "out" / "ui-checks" / str(time.time_ns())
+        self.lab = Lab(output=self.folder)
+        self.addCleanup(self.lab.close)
+        self.wait_ready()
+
+    def wait_ready(self):
+        deadline = time.monotonic() + 10
+        while self.lab.ready_revision != self.lab.revision and time.monotonic() < deadline:
+            self.lab.update()
+            time.sleep(0.005)
+        self.assertEqual(self.lab.ready_revision, self.lab.revision)
+        self.lab.draw()
+
+    def click(self, key):
+        point = self.lab.buttons[key].center
+        self.lab.event(pygame.event.Event(pygame.MOUSEBUTTONDOWN, button=1, pos=point))
+        self.lab.event(pygame.event.Event(pygame.MOUSEBUTTONUP, button=1, pos=point))
+
+    def test_no_autoplay_and_repeated_play_does_not_stack_audio(self):
+        self.assertFalse(self.lab.playing)
+        self.assertFalse(pygame.mixer.get_busy())
+        self.click(("play", 0))
+        self.assertTrue(self.lab.playing)
+        self.assertTrue(pygame.mixer.get_busy())
+        self.click(("play", 0))
+        self.assertFalse(self.lab.playing)
+        self.assertFalse(pygame.mixer.get_busy())
+
+    def test_mouse_slider_changes_samples_and_clamps_outside_track(self):
+        before = self.lab.samples.copy()
+        key, rect = self.lab.sliders[0]
+        self.lab.event(pygame.event.Event(pygame.MOUSEBUTTONDOWN, button=1,
+                                          pos=(rect.left, rect.centery)))
+        self.lab.event(pygame.event.Event(pygame.MOUSEMOTION,
+                                          pos=(rect.left - 100, rect.centery)))
+        self.lab.event(pygame.event.Event(pygame.MOUSEBUTTONUP, button=1,
+                                          pos=(rect.left - 100, rect.centery)))
+        self.assertEqual(self.lab.mix.levels[0], 0)
+        self.assertIsNone(self.lab.dragging)
+        self.wait_ready()
+        self.assertNotEqual(before, self.lab.samples)
+
+    def test_level_and_master_change_without_restarting_or_regenerating(self):
+        self.click(("play", 0))
+        origin = self.lab.play_origin
+        channels = [pygame.mixer.Channel(self.lab.audio.bank * 3 + i) for i in range(3)]
+        sounds = [channel.get_sound() for channel in channels]
+        with patch.object(self.lab.audio, "play", wraps=self.lab.audio.play) as replay:
+            with patch.object(self.lab.pool, "submit", wraps=self.lab.pool.submit) as render:
+                for key, fraction in ((("level", 0), 0.15), (("master", 0), 0.5)):
+                    rect = next(rect for item, rect in self.lab.sliders if item == key)
+                    self.lab.move_slider(key, (rect.left + rect.width * fraction, rect.centery))
+                self.lab.update()
+                replay.assert_not_called()
+                render.assert_not_called()
+        self.assertEqual(self.lab.play_origin, origin)
+        self.assertTrue(self.lab.playing)
+        for i, channel in enumerate(channels):
+            self.assertIs(channel.get_sound(), sounds[i])
+            self.assertAlmostEqual(sounds[i].get_volume(),
+                                   self.lab.mix.levels[i] * self.lab.mix.master, delta=1 / 128)
+        self.assertEqual(self.lab.ready_revision, self.lab.revision)
+
+    def test_drag_burst_keeps_the_final_value_release_and_stop(self):
+        self.click(("play", 0))
+        _, rect = self.lab.sliders[0]
+        events = [pygame.event.Event(pygame.MOUSEBUTTONDOWN, button=1,
+                                     pos=(rect.left, rect.centery))]
+        for fraction in (0.2, 0.4, 0.6, 0.9):
+            events.append(pygame.event.Event(pygame.MOUSEMOTION,
+                                             pos=(rect.left + rect.width * fraction, rect.centery)))
+        events.extend([pygame.event.Event(pygame.MOUSEBUTTONUP, button=1,
+                                          pos=(rect.right, rect.centery)),
+                       pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE),
+                       pygame.event.Event(pygame.QUIT)])
+        with patch("pygame.event.get", return_value=events):
+            self.lab.run()
+        self.assertAlmostEqual(self.lab.mix.levels[0], 0.9)
+        self.assertIsNone(self.lab.dragging)
+        self.assertFalse(self.lab.playing)
+
+    def test_muted_layer_joins_existing_playback_without_restarting(self):
+        self.click(("toggle", 0))
+        self.click(("play", 0))
+        channel = pygame.mixer.Channel(self.lab.audio.bank * 3)
+        sound = channel.get_sound()
+        self.assertEqual(sound.get_volume(), 0)
+        origin = self.lab.play_origin
+        with patch.object(self.lab.audio, "play", wraps=self.lab.audio.play) as replay:
+            self.click(("toggle", 0))
+            replay.assert_not_called()
+        self.assertIs(channel.get_sound(), sound)
+        self.assertGreater(sound.get_volume(), 0)
+        self.assertEqual(self.lab.play_origin, origin)
+
+    def test_gain_changes_during_pattern_generation_use_the_latest_recipe(self):
+        self.lab.choose_preset("Night orbit")
+        self.lab.last_edit = 0
+        self.lab.update()
+        self.lab.mix.master = 0.25
+        self.lab.mix.levels[0] = 0.9
+        self.lab.changed("Latest volume while the pattern is being made.")
+        self.wait_ready()
+        self.assertEqual(self.lab.samples, mix_layers(self.lab.layers, self.lab.mix))
+        self.lab.export()
+        import wave
+        with wave.open(str(self.lab.last_saved), "rb") as audio:
+            self.assertEqual(audio.readframes(audio.getnframes()), pcm_bytes(self.lab.samples) * 2)
+
+    def test_stop_during_render_is_not_undone_by_background_result(self):
+        self.click(("play", 0))
+        self.click(("preset", "Glass garden"))
+        self.click(("play", 0))
+        self.wait_ready()
+        self.assertFalse(self.lab.playing)
+        self.assertFalse(pygame.mixer.get_busy())
+
+    def test_all_off_gives_feedback_and_reset_restores_a_stopped_recipe(self):
+        for index in range(3):
+            self.click(("toggle", index))
+        self.click(("play", 0))
+        self.assertFalse(self.lab.playing)
+        self.assertIn("silent", self.lab.message)
+        self.click(("reset", 0))
+        self.wait_ready()
+        self.assertEqual(self.lab.mix.levels, [0.78, 0.32, 0.20])
+        self.assertEqual(self.lab.mix.enabled, [True, True, True])
+        self.assertFalse(self.lab.playing)
+
+    def test_latest_slider_state_wins_over_an_older_render(self):
+        self.lab.choose_preset("Night orbit")
+        self.lab.last_edit = 0
+        self.lab.update()
+        self.lab.choose_preset("Glass garden")
+        self.wait_ready()
+        self.assertEqual(self.lab.job_mix.levels, self.lab.mix.levels)
+        self.assertEqual(self.lab.job_mix.character, self.lab.mix.character)
+
+    def test_export_while_stopped_and_repeated_save_are_safe(self):
+        self.click(("save", 0))
+        self.assertIsNotNone(self.lab.last_saved)
+        first = self.lab.last_saved
+        self.click(("save", 0))
+        self.assertEqual(self.lab.last_saved, first)
+        self.assertEqual(len(list(self.folder.glob("*.wav"))), 1)
+        self.assertFalse(self.lab.playing)
+
+    def test_saved_folder_button_only_opens_the_completed_exports_directory(self):
+        self.assertNotIn(("folder", 0), self.lab.buttons)
+        self.click(("save", 0))
+        self.lab.draw()
+        with patch("app.open_directory") as opener:
+            self.click(("folder", 0))
+            opener.assert_called_once_with(self.folder.resolve())
+        self.assertTrue(self.lab.last_saved.is_file())
+
+    def test_folder_open_failure_keeps_the_export_and_app_usable(self):
+        self.click(("save", 0))
+        self.lab.draw()
+        with patch("app.open_directory", side_effect=OSError("test: no folder viewer")):
+            self.click(("folder", 0))
+        self.assertIn("Could not open", self.lab.message)
+        self.assertTrue(self.lab.last_saved.is_file())
+        self.click(("play", 0))
+        self.assertTrue(self.lab.playing)
+
+    def test_moved_export_does_not_open_an_unrelated_folder(self):
+        self.lab.last_saved = self.folder / "not-there.wav"
+        self.lab.draw()
+        with patch("app.open_directory") as opener:
+            self.click(("folder", 0))
+            opener.assert_not_called()
+        self.assertIn("no longer here", self.lab.message)
+
+    def test_unavailable_audio_still_allows_export_and_play_retries(self):
+        self.lab.audio.available = False
+        with patch.object(self.lab.audio, "connect", return_value=False):
+            self.click(("play", 0))
+        self.assertFalse(self.lab.playing)
+        self.assertIn("unavailable", self.lab.message)
+        self.click(("save", 0))
+        self.assertTrue(self.lab.last_saved.is_file())
+        with patch.object(self.lab.audio, "connect", return_value=True):
+            self.click(("play", 0))
+        self.assertTrue(self.lab.playing)
+
+    def test_focus_loss_and_escape_stop_immediately(self):
+        self.click(("play", 0))
+        self.lab.event(pygame.event.Event(pygame.WINDOWFOCUSLOST))
+        self.assertFalse(self.lab.playing)
+        self.click(("play", 0))
+        self.lab.event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE))
+        self.assertFalse(self.lab.playing)
+        self.assertFalse(pygame.mixer.get_busy())
+
+    def test_export_error_is_reported_without_crashing(self):
+        with patch("app.save_mix", side_effect=PermissionError("test: folder is read-only")):
+            self.click(("save", 0))
+        self.assertIsNone(self.lab.last_saved)
+        self.assertIn("Could not save", self.lab.message)
+        self.click(("play", 0))
+        self.assertTrue(self.lab.playing)
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
+
