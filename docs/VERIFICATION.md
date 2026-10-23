@@ -13,6 +13,131 @@
 
 ## Executed checks
 
+### Mist greenhouse visual packaging / 23 October 2026
+
+- All 38 existing interaction checks passed. No gameplay/model tests were added
+  for a cosmetic change. The application uses the same controls and hitboxes.
+- Default, muted, rejected-share, unlock and naming captures were rendered and
+  visually inspected. Text, disabled instructions, orange rejection feedback,
+  unlock banner and modal controls remain readable. Botanical line art stays
+  mostly near margins and uses low contrast.
+- New `backdrop.py` produces a deterministic opaque surface without display
+  initialization, file access or random-state mutation. The drawing agent checked
+  1x1, 35x21, 600x900, 1280x900 and 1920x1080 sizes; the 1280x900 render took about
+  0.023 seconds locally. The app caches it once, along with panel-shadow surfaces.
+- Main screenshot, muted-control example, wrong-recipe example and unlock
+  example were refreshed. The feedback GIFs were regenerated with the current
+  palette. Other state captures are under ignored `out/mist-theme/`.
+- The offline Windows launcher successfully generated `out/mist-launcher.png`.
+- Snapshot: `.backups/before-mist-theme-20261023-011948/`. Changed UI palette,
+  decorative drawing/shadows, documentation and examples. The sound generator,
+  scene rules and garden renderer remain unchanged. This checks rendering and
+  behavior; aesthetic preference and a real user trial still need human feedback.
+
+### Discovery rewards and eight landscapes / 23 October 2026
+
+- `test_ui.py`: all 38 checks passed. New coverage verifies visible named reward
+  text and NEW! cards without autoplay, no repeated reward for an existing
+  discovery, ordered rapid unlocks, first unlocks from keeping/sharing, page-2
+  hints and navigation, pausing while naming, normal expiry and bounded/finished
+  celebration pixels. Restart coverage also checks cleared notification state.
+- `test_garden.py`: all 25 checks passed. All eight scenes are reachable and
+  discovered once; original IDs/order/recipes stay stable. New checks exercise
+  required enabled ingredients, inclusive boundaries, character requirements,
+  master independence and new-card restore/explicit-archive round trips.
+- A drawing comparison by the assistant reviewer found the original four
+  scenes pixel-identical to the pre-change renderer at the same parameters/time.
+  Its most complex new scene plus celebration averaged about 13 ms/frame in
+  the local Pygame environment. This is a local render measurement, not a
+  guarantee for other hardware.
+- New-scenery gallery, full unlock view and guide page 2 were rendered and
+  visually inspected. Current main screenshot shows 0/8. Shareable examples are
+  `docs/discovery-unlocked.png` and `docs/discovery-unlock.gif` (40 scripted
+  frames, five seconds, silent). Other captures remain in ignored
+  `out/discovery-rewards/`. These are implementation captures, not user trials.
+- Native Windows smoke check rendered Starlit canopy and its unlock on guide
+  page 2, confirmed no autoplay, then started/stopped playback. Closing/reopening
+  reset progress, guide page and notification queue. The offline Windows launcher
+  also completed a fresh screenshot invocation. These are API/runtime checks,
+  not a human judgment of reward prominence or listening quality.
+- The eight pre-existing collection/export files still match the earlier
+  SHA-256 manifest; `sound.py` remains identical to its pre-revision source.
+- Snapshot: `.backups/before-discovery-rewards-20261023-005223/`. Changes cover
+  scene rules/drawing, UI reward queue and guide pagination, related tests,
+  instructions and examples. No sound-source, launcher, dependency or normal
+  visit-persistence changes were required.
+
+Earlier four-scene counts below are historical. Current normal launch starts
+with eight undiscovered entries, three unfinished wishes and an empty collection.
+
+### Fresh visits / 23 October 2026
+
+- `test_ui.py`: all 31 checks passed. Updated collection tests distinguish
+  same-visit restoration from persistence. New restart coverage places a fully
+  completed legacy archive beside the app's test output, then verifies a new
+  window has no discoveries, stamps or cards and leaves that file byte-identical.
+  Other coverage verifies normal gameplay never calls progress persistence.
+- `test_garden.py`: all 20 checks passed. A default Garden is memory-only;
+  collecting/restoring/completing works without filesystem reads or writes, and
+  a new Garden is empty. Existing explicit-folder archive checks still pass for
+  preservation of earlier files; normal application startup does not use them.
+- A native Windows window completed all four discoveries and three wishes and
+  kept one garden, then closed. Reopening through the default Lab constructor
+  showed 0/4 discoveries, 0/3 stamps and no cards, with initial sound controls,
+  first note selected and no autoplay. Before/after captures are under isolated
+  ignored `out/fresh-visit-check/`.
+- An offline fresh-process screenshot invocation regenerated
+  `docs/screenshot.png` with empty progress and the visit-lifetime notice.
+- SHA-256 checks against the pre-change manifest confirmed all 8 pre-existing
+  collection/export files were still present and byte-identical. No progress
+  files or WAV exports were deleted. Sound synthesis and launcher are unchanged.
+- Snapshot: `.backups/before-fresh-visits-20261023-002215/`. Changed application
+  startup/progress calls, the default Garden lifetime, corresponding tests,
+  instructions/process notes and the main screenshot.
+
+This supersedes earlier notes about automatic collection restoration and
+collection disk-save errors. Exported WAV/recipe files still persist. Native
+checks establish runtime state changes, not a person-observed usability trial.
+
+### Rejected Share feedback / 23 October 2026
+
+- `test_ui.py`: all 30 checks passed. New cases exercise rejected sharing through
+  the button handler, inline visitor-card text, repeated attempts after the pulse
+  settles, unchanged recipe/rewards, clearing after edits or switching notes,
+  successful resubmission and a rapid second click on a completed note.
+- `test_garden.py`: all 19 checks passed. New coverage checks direction/range
+  instructions, disabled ingredients and exact acceptance boundaries. Existing
+  discovery and collection checks continue to pass. The acceptance ranges and
+  error messages share `WISH_LIMITS`; the numerical conditions are unchanged.
+- Rejected, ingredient-OFF and successful visitor-card views were rendered and
+  visually inspected. Captures are in isolated ignored `out/wish-feedback/`;
+  `docs/wish-feedback.png` and `docs/wish-feedback.gif` show the rejected state.
+  The animation captures changed border pixels at different elapsed times.
+- The short border animation ends while inline guidance remains. Editing the
+  recipe or changing notes clears the stale guidance. No sound effect is added.
+- Snapshot: `.backups/before-wish-feedback-20261023-000852/`. Changed application,
+  wish-feedback logic, related tests, instructions and demonstration assets.
+  Sound synthesis, dependency setup and saved-data format are unchanged.
+- The checks use scripted input and silent SDL rendering. This is implementation
+  evidence; no physical mouse, speaker or other-person acceptance is claimed.
+
+### Muted parameter controls
+
+- The complete `test_ui.py` suite passed: 28 checks. Two new scenarios cover all
+  three ingredients: LEVEL zero rejects clicks/drags without changing parameter
+  state or scheduling new sound work, and OFF retains the parameter while still
+  allowing volume edits. Raising LEVEL or switching back ON restores editing
+  with the original parameter value intact.
+- Enabled, LEVEL-zero and OFF states were rendered. The three-card muted view
+  in `docs/controls-muted.png` and the mixed ON/OFF view under ignored
+  `out/control-hints/` were visually inspected for readable recovery hints and
+  layout. The main screenshot was refreshed with VOLUME / LEVEL labels.
+- Recovery snapshot: `.backups/before-control-hints-20261022-235603/`.
+  Changes cover `app.py`, `test_ui.py`, instructions/process notes and screenshots.
+  Sound synthesis, dependencies, stored recipes and the launcher are unchanged.
+- These checks use silent SDL devices and scripted input. Physical mouse and
+  speaker acceptance of this particular UI revision remain for the next trial.
+
 ### Sound garden revision
 
 - `test_sound.py`: 12 checks passed. SHA-256 confirms `sound.py` is identical

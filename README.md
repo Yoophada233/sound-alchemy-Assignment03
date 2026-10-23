@@ -9,22 +9,29 @@ your favourite gardens, or follow an optional visitor invitation.
 
 ![Sound Alchemy desktop interface](docs/screenshot.png)
 
-[Watch the garden loop](docs/garden-loop.gif) (silent, scripted demonstration
+The interface uses a mist-green greenhouse palette, fine botanical edge drawings
+and soft raised cards. The background is generated once and cached; its quiet
+decoration leaves the living garden, labels and feedback in focus.
+
+[Watch a discovery unlock](docs/discovery-unlock.gif) (silent, scripted demonstration
 using the actual application renderer; not a recording of a user trial).
 
 ## The interaction
 
 1. Move a slider and watch the garden respond immediately. Press **Play your mix**
    when you want to hear it. A stopped speaker still allows a visual preview.
-2. Explore four landscape discoveries. Click an unfound discovery card for a
-   clear recipe hint; there is no timer, score or wilting penalty.
+2. Explore eight landscape discoveries across two guide pages. Click an unfound
+   card for a clear recipe hint. A new discovery shows a named banner, a short
+   garden celebration and a pulsing NEW! card. Use **View card** to find it;
+   there is no gameplay timer, score or wilting penalty.
 3. Choose **Keep garden**, give it a name and press Enter. In **Kept gardens**,
    click a card to restore its exact sound controls and landscape, then press Play.
 4. For a little direction, **Open invitation** on a visitor note. Its hint gives
    generous ranges. **Share this garden** checks them and awards a thank-you stamp.
    **Next note** lets you leave it and try another. Free exploration always works.
 5. **Reset** restores the initial sound controls and stops playback. It preserves
-   discoveries, cards and stamps. **Save 8-second WAV** exports sound and a recipe;
+   this visit's discoveries, cards and stamps. Closing and reopening starts a
+   fresh visit with no progress. **Save 8-second WAV** exports sound and a recipe;
    **Open exports** opens the folder.
 
 The short loop is **adjust > see/hear > discover > keep > try another garden**.
@@ -81,21 +88,38 @@ the Windows fonts; the appearance may differ.
 
 ## Controls and feedback
 
+The four newer discoveries add distinct scenery:
+
+| Discovery | Landscape response |
+| --- | --- |
+| Storm roots | A dark rain cloud and glowing underground roots. |
+| Crystal rain | Blue faceted crystals beside reflective rain pools. |
+| Starlit canopy | An arch of leaves and linked constellations above the garden. |
+| Amber reeds | Tall golden reeds under a warm horizon. |
+
+Their recipe hints are on guide page 2. The original four discoveries remain
+available on page 1. All unlocks work during silent visual preview as well as
+playback. A notice stays for 4.5 seconds, with a short 1.4-second celebration;
+the card keeps its NEW! highlight for ten seconds. An already discovered recipe
+does not repeat the reward. [See the unlocked view](docs/discovery-unlocked.png).
+
 | Action | Response and feedback |
 | --- | --- |
 | Click a preset | Loads a different combination; the selected button is highlighted. |
 | Click an ingredient's ON/OFF button | Adds/removes that ingredient; the card and label change. |
 | Drag LEVEL | Changes the running sound volume and the corresponding rain, roots or flowers. The phrase keeps its position. |
 | Drag DROPS / PITCH / SPARKLE | Changes the pattern; Sparse/Dense, Lower/Higher and Fewer/More notes explain the direction. Counts show overlapping soft rain textures / bell notes per four-second loop; Rain is a continuous curtain rather than separate audible taps. |
+| LEVEL at zero / ingredient OFF | Its lower parameter is greyed out and marked DISABLED. Clicks and drags are blocked; the hint explains how to enable it. Its previous value is preserved. |
 | Drag MASTER | Changes all running layers immediately, including the recipe used for export. |
 | Play your mix / Stop listening / Space | The single main button starts or stops playback; repeated presses do not stack copies. Stopping keeps the recipe. |
 | Escape | Stops immediately; later background work cannot restart it. |
 | Reset / R | Stops and restores the initial Rainy window controls; keeps discoveries and saved cards. |
 | Save / S | Writes a new 8-second WAV and recipe under `out/mixes/`. |
 | Open exports | Becomes available after a successful WAV save and opens the export folder. |
-| Keep garden | Names and stores a complete recipe, including all switches and MASTER. Enter confirms; Esc or Back cancels. |
-| Discoveries / Kept gardens | Shows four discovery hints or restorable cards. Arrow buttons page through larger collections. |
-| Open invitation / Share this garden | Accepts an optional wish, then checks its broad conditions. A mismatch offers another hint. |
+| Keep garden | Names and keeps a complete recipe for this visit, including all switches and MASTER. Enter confirms; Esc or Back cancels. Closing clears it. |
+| Discoveries / Kept gardens | Shows eight discovery hints across two pages, or restorable cards. Each section has its own arrow buttons. |
+| New discovery / View card | Shows the unlocked name and a short celebration; View card opens its guide page. The x dismisses the notice. Rapid discoveries queue in order, and naming a garden pauses the notice timer. |
+| Open invitation / Share this garden | Accepts an optional wish, then checks its broad conditions. A mismatch pulses the visitor card border and shows NOT QUITE YET with a specific unmet LEVEL or ON/OFF requirement inside the card. |
 | Next note | Leaves the current invitation without a penalty; keeps previous stamps. |
 | Switch to another window | Stops playback; press Play after returning. |
 
@@ -110,6 +134,23 @@ four-second phrase with a short transition. Rapid mouse moves are combined so
 the interface follows the latest slider position.
 
 ## Mistakes and interruptions
+
+An unsuitable shared recipe shows an orange **NOT QUITE YET** panel beside the
+Share button, the number of unmet conditions, and one concrete adjustment to
+try next. The border pulses briefly on every rejected click. The explanation
+stays after the pulse and clears when controls change or another note opens.
+Sharing again checks the latest recipe. Completed notes retain their stamp and
+cannot be rejected by a rapid second click. No error sound is played.
+
+[Preview the wrong-recipe feedback](docs/wish-feedback.gif) (scripted capture).
+
+The upper **VOLUME / LEVEL** slider controls whether an ingredient can be heard.
+DROPS, PITCH and SPARKLE modify that ingredient; they are not separate sound
+sources. At LEVEL zero, raise that upper slider to enable the lower control.
+If the ingredient is OFF, switch it on as well. MASTER and playback remain
+independent: stopping playback still allows editing an enabled ingredient.
+
+![Disabled parameter controls with instructions](docs/controls-muted.png)
 
 - **Everything is off / all levels are zero:** Play explains how to make the
   mix audible. Saving a silent recipe gives a message rather than a misleading file.
@@ -126,31 +167,37 @@ If you hear nothing, check the ON/OFF buttons, levels, MASTER and device volume.
 If setup cannot download a dependency, keep the launcher message and retry when
 the connection is available. No service credentials are needed.
 
-## Your local collection
+## A fresh visit each time
 
-Discoveries, kept garden recipes and visitor stamps survive a restart under
-`out/gardens/`. Each completed save writes a **new** numbered JSON snapshot;
-previous snapshots are preserved. The newest valid snapshot loads on startup.
-If a newer file is damaged, the app reports recovery from an earlier snapshot.
-If disk saving fails, the app explicitly says progress is available this session
-only. Try keeping the garden again after fixing folder permissions.
+Every launch starts with **0/8 discoveries, 0/3 visitor stamps and no kept
+gardens**. Current recipe controls return to their initial values. Progress and
+cards live only in memory for this window, so the next visitor starts fresh.
+Within one visit you can still name, keep, page through and restore garden cards.
+The Reset button resets sound controls while retaining that visit's progress;
+close and reopen the app for a completely fresh visit.
+
+The app does not read or write progress files during normal use. Older
+`out/gardens/` snapshots are left intact and are ignored on startup. Explicitly
+exported WAVs and their recipe files under `out/mixes/` remain on disk; use
+**Save 8-second WAV** before leaving if you want to keep an audio result.
 
 Names can contain 1-28 characters, including Chinese on Windows. Empty names
 receive an inline message. A completely empty garden cannot be kept; muting
-MASTER is allowed because it only controls listening volume. Local names and
-collections are ignored by Git. There is no delete button in this small version.
+MASTER is allowed because it only controls listening volume. The naming dialog
+and collection area explain that kept cards last until the window closes.
 
 ## Files
 
 ```text
 app.py            window, naming, visitor/collection controls and audio playback
-garden.py         discoveries, wishes, validated cards and recoverable snapshots
+backdrop.py       cached mist gradient, botanical line art and soundwave rings
+garden.py         discoveries, wishes and validated cards for the current visit
 garden_view.py    procedural landscape drawn from the current Mix
 sound.py          Mix state, synthesis and WAV/recipe export
 start.cmd         Windows launcher with a project-local runtime/cache
 test_sound.py     signal and export checks; Python standard library only
 test_ui.py        event-handler checks using silent SDL test devices
-test_garden.py    discovery, wish, collection round-trip and recovery checks
+test_garden.py    fresh visits, discovery, wish, card and legacy archive checks
 README.md         idea, controls, run instructions and limitations
 PROCESS.md        development decisions, AI use and real user-trial status
 CREDITS.md        course inspiration and software/font credits
@@ -181,8 +228,8 @@ See [verification notes](docs/VERIFICATION.md) for the checks actually performed
 An [8-second default scene](docs/rainy-window-v4.wav) and a
 [rain-only preview](docs/rain-only-v4.wav) are available when someone
 cannot run the app. It illustrates the sound; the screenshot and controls table
-explain the interaction. The silent scripted GIF above shows visual changes,
-naming and collections. A sound-enabled screencast and live website have not
+explain the interaction. The silent scripted GIF above shows a named unlock
+notice and its garden celebration. A sound-enabled screencast and live website have not
 been produced.
 
 ## What one piece of the code does
@@ -199,7 +246,7 @@ program response and feedback**.
 
 ## Limits and submission status
 
-This is a deliberately small sound garden: four landscape discoveries and three
+This is a deliberately small sound garden: eight landscape discoveries and three
 visitor notes. It is not an endless simulation. The value comes from exploring
 and keeping different sound/visual combinations. Current
 Rain uses filters fitted to the measured spectrum of the student's

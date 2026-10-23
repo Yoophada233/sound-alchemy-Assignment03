@@ -20,6 +20,18 @@ SCENES = (
     {"id": "dawn-chorus", "title": "Dawn chorus",
      "hint": "Rain 25-65%; Bass 20-60%; Bells 45-85%; move Sparkle halfway or higher.",
      "accent": (204, 125, 103)},
+    {"id": "storm-roots", "title": "Storm roots",
+     "hint": "Rain and Bass 65% or more; Bells 35% or less. Let the storm wake deep roots.",
+     "accent": (74, 121, 157)},
+    {"id": "crystal-rain", "title": "Crystal rain",
+     "hint": "Rain 70% or more; Bells 65% or more; Bass 50% or less.",
+     "accent": (92, 170, 180)},
+    {"id": "starlit-canopy", "title": "Starlit canopy",
+     "hint": "Rain 50% or more; Bass and Bells 65% or more; move Sparkle at least 65% right.",
+     "accent": (98, 126, 184)},
+    {"id": "amber-reeds", "title": "Amber reeds",
+     "hint": "Rain 15-45%; Bass 35-55%; Bells 15-40%; move Pitch at least 65% right.",
+     "accent": (191, 138, 64)},
 )
 WISHES = (
     {"id": "a-soft-rain", "visitor": "The tired traveller", "title": "A soft rain",
@@ -35,6 +47,11 @@ WISHES = (
 )
 SCENE_IDS = {scene["id"] for scene in SCENES}
 WISH_IDS = {wish["id"] for wish in WISHES}
+WISH_LIMITS = {
+    "a-soft-rain": ((0, 0.60, 1), (1, 0, 0.50), (2, 0, 0.35)),
+    "roots-at-night": ((1, 0.60, 1), (0, 0, 0.50), (2, 0, 0.50)),
+    "a-place-for-fireflies": ((2, 0.60, 1), (0, 0, 0.45)),
+}
 
 
 def effective_levels(mix):
@@ -44,7 +61,7 @@ def effective_levels(mix):
 
 
 def scene_for(mix):
-    """Dawn takes precedence where its balanced recipe overlaps the firefly recipe."""
+    """Keep the first four recipes stable; new discoveries fill their unused regions."""
     rain, bass, bells = effective_levels(mix)
     if (0.25 <= rain <= 0.65 and 0.20 <= bass <= 0.60
             and 0.45 <= bells <= 0.85 and mix.character[2] >= 0.50):
@@ -55,6 +72,15 @@ def scene_for(mix):
         return "moonlit-roots"
     if bells >= 0.60 and rain <= 0.45:
         return "firefly-grove"
+    if rain >= 0.65 and bass >= 0.65 and bells <= 0.35:
+        return "storm-roots"
+    if rain >= 0.70 and bells >= 0.65 and bass <= 0.50:
+        return "crystal-rain"
+    if rain >= 0.50 and bass >= 0.65 and bells >= 0.65 and mix.character[2] >= 0.65:
+        return "starlit-canopy"
+    if (0.15 <= rain <= 0.45 and 0.35 <= bass <= 0.55
+            and 0.15 <= bells <= 0.40 and mix.character[1] >= 0.65):
+        return "amber-reeds"
     return None
 
 
@@ -138,14 +164,16 @@ def checked_snapshot(data):
 
 
 class Garden:
-    """State changes happen in memory; persist writes a new recoverable snapshot."""
+    """A fresh visit by default; an explicit folder can still read legacy archives."""
 
-    def __init__(self, folder):
-        self.folder = Path(folder)
+    def __init__(self, folder=None):
+        self.folder = Path(folder) if folder is not None else None
         self.discovered = set()
         self.completed = set()
         self.cards = []
         self.warning = ""
+        if self.folder is None:
+            return
         try:
             def snapshot_order(path):
                 stamp = path.stem.removeprefix("collection-")
@@ -202,16 +230,25 @@ class Garden:
                 return recipe_mix(card["recipe"])
         raise ValueError("That garden card is no longer available.")
 
+    def wish_gaps(self, wish_id, mix):
+        """The same ranges drive acceptance and specific recovery instructions."""
+        levels = effective_levels(mix)
+        gaps = []
+        for index, minimum, maximum in WISH_LIMITS[wish_id]:
+            value = levels[index]
+            name = ("Rain", "Bass", "Bells")[index]
+            if value < minimum:
+                if not mix.enabled[index]:
+                    gaps.append(f"Switch {name} ON and set LEVEL to {round(minimum * 100)}% or more.")
+                else:
+                    gaps.append(f"Raise {name} LEVEL to {round(minimum * 100)}% or more (now {round(value * 100)}%).")
+            elif value > maximum:
+                gaps.append(f"Lower {name} LEVEL to {round(maximum * 100)}% or less (now {round(value * 100)}%).")
+        return gaps
+
     def matching(self, wish_id, mix):
         # A wish accepts a broad recipe, even when it also discovers another scene.
-        rain, bass, bells = effective_levels(mix)
-        if wish_id == "a-soft-rain":
-            return rain >= 0.60 and bass <= 0.50 and bells <= 0.35
-        if wish_id == "roots-at-night":
-            return bass >= 0.60 and rain <= 0.50 and bells <= 0.50
-        if wish_id == "a-place-for-fireflies":
-            return bells >= 0.60 and rain <= 0.45
-        return False
+        return wish_id in WISH_IDS and not self.wish_gaps(wish_id, mix)
 
     def complete(self, wish_id, mix):
         if wish_id in self.completed or not self.matching(wish_id, mix):
@@ -221,6 +258,8 @@ class Garden:
         return True
 
     def persist(self):
+        if self.folder is None:
+            return None
         data = checked_snapshot({"version": 1, "discovered": sorted(self.discovered),
                                  "completed": sorted(self.completed), "cards": self.cards})
         text = json.dumps(data, indent=2, ensure_ascii=False, allow_nan=False) + "\n"

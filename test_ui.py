@@ -65,6 +65,53 @@ class InteractionTests(unittest.TestCase):
         self.wait_ready()
         self.assertNotEqual(before, self.lab.samples)
 
+    def test_zero_level_blocks_parameter_drag_and_raising_it_restores_control(self):
+        for index in range(3):
+            with self.subTest(ingredient=index):
+                key = ("character", index)
+                track = next(rect for item, rect in self.lab.sliders if item == key)
+                level = next(rect for item, rect in self.lab.sliders if item == ("level", index))
+                original = self.lab.mix.character[index]
+                self.lab.move_slider(("level", index), (level.left, level.centery))
+                revision = self.lab.revision
+                self.lab.event(pygame.event.Event(pygame.MOUSEBUTTONDOWN, button=1,
+                                                  pos=track.midright))
+                self.assertIsNone(self.lab.dragging)
+                self.lab.event(pygame.event.Event(pygame.MOUSEMOTION, pos=track.midleft))
+                self.lab.event(pygame.event.Event(pygame.MOUSEBUTTONUP, button=1,
+                                                  pos=track.midleft))
+                self.assertEqual(self.lab.mix.character[index], original)
+                self.assertEqual(self.lab.revision, revision)
+                self.assertIn("Raise LEVEL", self.lab.message)
+                self.lab.move_slider(("level", index), level.center)
+                self.assertEqual(self.lab.mix.character[index], original)
+                self.lab.event(pygame.event.Event(pygame.MOUSEBUTTONDOWN, button=1,
+                                                  pos=track.midright))
+                self.lab.event(pygame.event.Event(pygame.MOUSEBUTTONUP, button=1,
+                                                  pos=track.midright))
+                self.assertEqual(self.lab.mix.character[index], 1)
+
+    def test_off_ingredient_keeps_parameter_until_switched_back_on(self):
+        for index in range(3):
+            with self.subTest(ingredient=index):
+                original = self.lab.mix.character[index]
+                self.click(("toggle", index))
+                key = ("character", index)
+                track = next(rect for item, rect in self.lab.sliders if item == key)
+                level = next(rect for item, rect in self.lab.sliders if item == ("level", index))
+                self.lab.move_slider(("level", index), level.center)
+                self.assertEqual(self.lab.mix.levels[index], .5)
+                revision = self.lab.revision
+                self.lab.move_slider(key, track.midright)
+                self.assertIsNone(self.lab.dragging)
+                self.assertEqual(self.lab.mix.character[index], original)
+                self.assertEqual(self.lab.revision, revision)
+                self.assertIn("Switch", self.lab.message)
+                self.click(("toggle", index))
+                self.assertEqual(self.lab.mix.character[index], original)
+                self.lab.move_slider(key, track.midright)
+                self.assertEqual(self.lab.mix.character[index], 1)
+
     def test_level_and_master_change_without_restarting_or_regenerating(self):
         self.click(("play", 0))
         origin = self.lab.play_origin
@@ -233,7 +280,94 @@ class InteractionTests(unittest.TestCase):
         self.assertIn("rainy-moss", self.lab.garden.discovered)
         self.assertIn("Discovered", self.lab.message)
         self.assertFalse(self.lab.playing)
-        self.assertTrue(list(self.lab.garden.folder.glob("collection-*.json")))
+        self.assertFalse(self.folder.exists())
+
+    def test_unlock_is_announced_visibly_once_without_starting_audio(self):
+        self.lab.choose_preset("Rainy window")
+        self.assertEqual(self.lab.discovery_current, "rainy-moss")
+        with patch.object(self.lab, "text", wraps=self.lab.text) as text:
+            self.lab.draw()
+        labels = [call.args[0] for call in text.call_args_list]
+        self.assertIn("NEW DISCOVERY!", labels)
+        self.assertIn("NEW! / click for its recipe hint", labels)
+        self.assertFalse(self.lab.playing)
+        self.assertFalse(pygame.mixer.get_busy())
+        self.click(("discovery_close", 0))
+        self.lab.choose_preset("Rainy window")
+        self.assertIsNone(self.lab.discovery_current)
+        self.assertFalse(self.lab.discovery_queue)
+
+    def test_rapid_discoveries_are_announced_in_order_instead_of_replacing_each_other(self):
+        for name in ("Rainy window", "Night orbit", "Glass garden"):
+            self.lab.choose_preset(name)
+        for scene_id in ("rainy-moss", "moonlit-roots", "dawn-chorus"):
+            self.assertEqual(self.lab.discovery_current, scene_id)
+            self.lab.draw()
+            self.click(("discovery_close", 0))
+        self.assertIsNone(self.lab.discovery_current)
+        self.assertFalse(self.lab.discovery_queue)
+        self.assertEqual(len(self.lab.garden.discovered), 3)
+
+    def test_first_discovery_from_keeping_a_garden_can_be_viewed_in_the_guide(self):
+        self.lab.begin_keep()
+        self.lab.finish_keep()
+        self.assertEqual(self.lab.discovery_current, "rainy-moss")
+        self.assertEqual(self.lab.collection_tab, "cards")
+        self.lab.draw()
+        self.click(("discovery_view", 0))
+        self.assertEqual(self.lab.collection_tab, "guide")
+        self.assertEqual(self.lab.guide_page, 0)
+        self.assertEqual(len(self.lab.garden.cards), 1)
+
+    def test_first_discovery_from_a_wish_is_announced_with_its_stamp(self):
+        self.lab.visitor_action()
+        self.lab.visitor_action()
+        self.assertEqual(self.lab.discovery_current, "rainy-moss")
+        self.assertIn("a-soft-rain", self.lab.garden.completed)
+
+    def test_second_discovery_page_has_hints_and_new_unlocks_reveal_the_correct_page(self):
+        self.click(("guide_page", 1))
+        self.lab.draw()
+        self.assertNotIn(("guide", 0), self.lab.buttons)
+        self.assertIn(("guide", 7), self.lab.buttons)
+        self.click(("guide", 7))
+        self.assertIn("Pitch", self.lab.message)
+        self.click(("guide_page", -1))
+        self.lab.mix.levels = [.3, .45, .25]
+        self.lab.mix.character[1] = .8
+        self.lab.changed("Grow amber reeds.")
+        self.assertEqual(self.lab.discovery_current, "amber-reeds")
+        self.assertEqual(self.lab.guide_page, 1)
+        self.lab.draw()
+        self.assertIn(("guide", 7), self.lab.buttons)
+
+    def test_unlock_notice_pauses_during_naming_then_expires_normally(self):
+        self.lab.choose_preset("Rainy window")
+        started = self.lab.discovery_started
+        self.lab.begin_keep()
+        self.lab.update_discoveries(started + 1)
+        self.lab.update_discoveries(started + 10)
+        self.assertEqual(self.lab.discovery_current, "rainy-moss")
+        self.lab.event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE))
+        self.lab.update_discoveries(started + 10)
+        self.assertEqual(self.lab.discovery_current, "rainy-moss")
+        self.lab.update_discoveries(started + 14)
+        self.assertIsNone(self.lab.discovery_current)
+
+    def test_celebration_stays_in_garden_and_finishes_without_leftover_pixels(self):
+        from garden_view import draw_discovery_effect
+        surface = pygame.Surface((1000, 500), pygame.SRCALPHA)
+        rect = pygame.Rect(34, 98, 790, 312)
+        draw_discovery_effect(surface, rect, (92, 170, 180), .25)
+        self.assertTrue(rect.contains(surface.get_bounding_rect()))
+        first = pygame.image.tobytes(surface, "RGBA")
+        surface.fill((0, 0, 0, 0))
+        draw_discovery_effect(surface, rect, (92, 170, 180), .8)
+        self.assertNotEqual(pygame.image.tobytes(surface, "RGBA"), first)
+        for elapsed in (-1, 1.4, 5):
+            surface.fill((0, 0, 0, 0))
+            draw_discovery_effect(surface, rect, (92, 170, 180), elapsed)
+            self.assertEqual(surface.get_bounding_rect().size, (0, 0))
 
     def test_master_volume_does_not_unlock_or_change_a_garden(self):
         from garden import scene_for
@@ -244,7 +378,6 @@ class InteractionTests(unittest.TestCase):
         self.assertFalse(self.lab.garden.discovered)
 
     def test_name_entry_keeps_a_restorable_card_and_blocks_global_shortcuts(self):
-        from garden import Garden
         expected = self.lab.mix.settings()
         self.click(("keep", 0))
         self.lab.draw()
@@ -257,7 +390,7 @@ class InteractionTests(unittest.TestCase):
         self.assertFalse(self.lab.naming)
         card = self.lab.garden.cards[0]
         self.assertEqual(card["name"], "Sea of light")
-        self.assertEqual(Garden(self.lab.garden.folder).restore(card["id"]).settings(), expected)
+        self.assertEqual(self.lab.garden.restore(card["id"]).settings(), expected)
         self.lab.choose_preset("Night orbit")
         self.lab.draw()
         self.click(("restore", card["id"]))
@@ -307,15 +440,100 @@ class InteractionTests(unittest.TestCase):
         self.click(("wish", 0))
         self.assertIn("roots-at-night", self.lab.garden.completed)
 
-    def test_save_failure_keeps_session_card_and_user_can_retry(self):
-        self.click(("keep", 0))
-        with patch.object(self.lab.garden, "persist", side_effect=PermissionError("test: no write")):
+    def test_wrong_share_shows_inline_guidance_and_retriggers_after_each_click(self):
+        self.lab.choose_preset("Night orbit")
+        self.click(("wish", 0))
+        self.lab.draw()
+        recipe = self.lab.mix.settings()
+        self.click(("wish", 0))
+        self.assertIsNotNone(self.lab.wish_error_at)
+        self.assertEqual(self.lab.mix.settings(), recipe)
+        self.assertFalse(self.lab.garden.completed)
+        self.assertFalse(self.lab.playing)
+        with patch.object(self.lab, "text", wraps=self.lab.text) as text:
+            self.lab.draw()
+        panel_text = [call.args[0] for call in text.call_args_list
+                      if call.args[1] == 869 and 250 <= call.args[2] <= 330]
+        self.assertTrue(any("NOT QUITE YET" in line for line in panel_text))
+        self.assertTrue(any("Raise Rain LEVEL" in line for line in panel_text))
+        self.lab.wish_error_at -= 2
+        previous = self.lab.wish_error_at
+        self.lab.draw()
+        self.assertEqual(self.lab.wish_error_at, previous)
+        self.click(("wish", 0))
+        self.assertGreater(self.lab.wish_error_at, previous)
+
+    def test_wrong_share_clears_on_edits_success_and_switching_notes(self):
+        self.lab.choose_preset("Night orbit")
+        self.click(("wish", 0))
+        self.lab.draw()
+        self.click(("wish", 0))
+        self.assertIsNotNone(self.lab.wish_error_at)
+        self.lab.choose_preset("Rainy window")
+        self.assertIsNone(self.lab.wish_error_at)
+        self.lab.draw()
+        self.click(("wish", 0))
+        self.assertIsNone(self.lab.wish_error_at)
+        self.assertIn("a-soft-rain", self.lab.garden.completed)
+        self.lab.visitor_action()  # A double click before redraw cannot reject a completed note.
+        self.assertIsNone(self.lab.wish_error_at)
+        self.click(("next_wish", 0))
+        self.lab.draw()
+        self.click(("wish", 0))
+        self.lab.draw()
+        self.click(("wish", 0))
+        self.assertIsNotNone(self.lab.wish_error_at)
+        self.click(("next_wish", 0))
+        self.assertIsNone(self.lab.wish_error_at)
+        self.assertEqual(len(self.lab.garden.completed), 1)
+
+    def test_visit_progress_and_kept_cards_do_not_require_disk_writes(self):
+        with patch.object(self.lab.garden, "persist", side_effect=AssertionError("Progress must stay in memory")) as writer:
+            self.lab.choose_preset("Night orbit")
+            self.lab.choose_preset("Rainy window")
+            self.click(("keep", 0))
             self.lab.event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_RETURN))
+            self.lab.visitor_action()
+            self.lab.visitor_action()
+            writer.assert_not_called()
         self.assertFalse(self.lab.naming)
         self.assertEqual(len(self.lab.garden.cards), 1)
-        self.assertIn("session only", self.lab.message)
-        self.assertTrue(self.lab.persist_garden())
-        self.assertTrue(list(self.lab.garden.folder.glob("collection-*.json")))
+        self.assertTrue(self.lab.garden.discovered)
+        self.assertIn("a-soft-rain", self.lab.garden.completed)
+        self.assertFalse(self.folder.exists())
+
+    def test_reopening_starts_fresh_and_leaves_existing_collection_files_untouched(self):
+        from garden import Garden, SCENES, WISHES
+        archive = Garden(self.folder / "gardens")
+        archive.save_card("Earlier visitor", self.lab.mix)
+        archive.discovered.update(scene["id"] for scene in SCENES)
+        archive.completed.update(wish["id"] for wish in WISHES)
+        path = archive.persist()
+        original = path.read_bytes()
+        self.lab.begin_keep()
+        self.lab.finish_keep()
+        self.lab.visitor_action()
+        self.lab.visitor_action()
+        self.assertTrue(self.lab.garden.cards)
+        self.assertTrue(self.lab.garden.completed)
+        self.assertTrue(self.lab.garden.discovered)
+        self.lab.close()
+        with patch("garden.Path.read_text", side_effect=AssertionError("Do not read an earlier visit")):
+            self.lab = Lab(output=self.folder)
+        self.addCleanup(self.lab.close)
+        self.wait_ready()
+        self.assertFalse(self.lab.garden.discovered)
+        self.assertFalse(self.lab.garden.completed)
+        self.assertFalse(self.lab.garden.cards)
+        self.assertIsNone(self.lab.active_wish)
+        self.assertEqual(self.lab.wish_index, 0)
+        self.assertEqual(self.lab.card_page, 0)
+        self.assertEqual(self.lab.guide_page, 0)
+        self.assertIsNone(self.lab.discovery_current)
+        self.assertFalse(self.lab.discovery_queue)
+        self.assertFalse(self.lab.discovery_highlights)
+        self.assertFalse(self.lab.playing)
+        self.assertEqual(path.read_bytes(), original)
 
     def test_reset_keeps_collection_and_silent_ingredients_cannot_be_kept(self):
         self.lab.begin_keep()

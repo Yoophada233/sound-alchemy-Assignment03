@@ -16,7 +16,9 @@ from sound import Mix
 
 HERE = Path(__file__).resolve().parent
 RECIPES = ((0.80, 0.25, 0.20), (0.20, 0.80, 0.20),
-           (0.15, 0.20, 0.80), (0.50, 0.40, 0.65))
+           (0.15, 0.20, 0.80), (0.50, 0.40, 0.65),
+           (0.80, 0.75, 0.20), (0.80, 0.30, 0.80),
+           (0.65, 0.75, 0.80), (0.30, 0.45, 0.25))
 
 
 class GardenTests(unittest.TestCase):
@@ -27,8 +29,10 @@ class GardenTests(unittest.TestCase):
     def mix(self, index):
         mix = Mix()
         mix.levels = list(RECIPES[index])
-        if index == 3:
+        if index in (3, 6):
             mix.character[2] = 0.75
+        if index == 7:
+            mix.character[1] = 0.80
         return mix
 
     def test_new_session_creates_no_files_and_no_free_progress(self):
@@ -37,12 +41,79 @@ class GardenTests(unittest.TestCase):
         self.assertEqual(self.garden.completed, set())
         self.assertEqual(self.garden.cards, [])
 
-    def test_all_four_scenes_can_be_discovered_once(self):
+    def test_default_visit_has_no_storage_and_next_visit_starts_empty(self):
+        with patch("garden.Path.read_text", side_effect=AssertionError("No history reads")):
+            with patch("garden.Path.mkdir", side_effect=AssertionError("No progress writes")):
+                visit = Garden()
+                card = visit.save_card("For this visit", self.mix(0))
+                self.assertTrue(visit.complete(WISHES[0]["id"], self.mix(0)))
+                self.assertEqual(visit.restore(card["id"]).settings(), self.mix(0).settings())
+                self.assertIsNone(visit.persist())
+                next_visit = Garden()
+                self.assertFalse(next_visit.cards)
+                self.assertFalse(next_visit.discovered)
+                self.assertFalse(next_visit.completed)
+
+    def test_all_eight_scenes_can_be_discovered_once(self):
         for index, scene in enumerate(SCENES):
             mix = self.mix(index)
             self.assertEqual(self.garden.discover(mix), scene["id"])
             self.assertIsNone(self.garden.discover(mix))
         self.assertEqual(self.garden.discovered, {s["id"] for s in SCENES})
+
+    def test_original_discoveries_keep_their_ids_order_and_classification(self):
+        original = ("rainy-moss", "moonlit-roots", "firefly-grove", "dawn-chorus")
+        self.assertEqual(tuple(scene["id"] for scene in SCENES[:4]), original)
+        for index, scene_id in enumerate(original):
+            with self.subTest(scene=scene_id):
+                mix = self.mix(index)
+                self.assertEqual(scene_for(mix), scene_id)
+                card = self.garden.save_card("An earlier garden", mix)
+                self.assertEqual(self.garden.restore(card["id"]).settings(), mix.settings())
+
+    def test_new_scenes_need_their_active_ingredients(self):
+        required = {4: (0, 1), 5: (0, 2), 6: (0, 1, 2), 7: (0, 1, 2)}
+        for index, ingredients in required.items():
+            for ingredient in ingredients:
+                with self.subTest(scene=SCENES[index]["id"], muted=ingredient):
+                    mix = self.mix(index)
+                    mix.enabled[ingredient] = False
+                    self.assertNotEqual(scene_for(mix), SCENES[index]["id"])
+
+    def test_starlit_and_amber_require_their_character_controls(self):
+        for index, character in ((6, 2), (7, 1)):
+            with self.subTest(scene=SCENES[index]["id"]):
+                mix = self.mix(index)
+                mix.character[character] = 0.64
+                self.assertIsNone(scene_for(mix))
+                mix.character[character] = 0.65
+                self.assertEqual(scene_for(mix), SCENES[index]["id"])
+
+    def test_new_scene_boundaries_are_inclusive_and_ignore_master_volume(self):
+        boundaries = ((4, [0.65, 0.65, 0.35]), (5, [0.70, 0.50, 0.65]),
+                      (6, [0.50, 0.65, 0.65]), (7, [0.15, 0.35, 0.15]),
+                      (7, [0.45, 0.55, 0.40]))
+        for index, levels in boundaries:
+            with self.subTest(scene=SCENES[index]["id"], levels=levels):
+                mix = self.mix(index)
+                mix.levels = levels
+                mix.master = 0
+                self.assertEqual(scene_for(mix), SCENES[index]["id"])
+
+    def test_new_scene_cards_restore_and_explicit_archives_round_trip(self):
+        cards = []
+        for index, scene in enumerate(SCENES[4:], 4):
+            mix = self.mix(index)
+            card = self.garden.save_card(scene["title"], mix)
+            cards.append((card, mix))
+        self.garden.persist()
+        loaded = Garden(self.folder)
+        for card, mix in cards:
+            with self.subTest(scene=card["scene"]):
+                restored = loaded.restore(card["id"])
+                self.assertEqual(restored.settings(), mix.settings())
+                self.assertEqual(scene_for(restored), card["scene"])
+                self.assertIn(card["scene"], loaded.discovered)
 
     def test_muted_ingredients_count_as_zero_but_master_is_independent(self):
         mix = self.mix(0)
@@ -118,6 +189,21 @@ class GardenTests(unittest.TestCase):
         mix.levels = [0.40, 0.60, 0.50]
         self.assertEqual(scene_for(mix), "dawn-chorus")
         self.assertTrue(self.garden.matching("roots-at-night", mix))
+
+    def test_rejected_wish_explains_unmet_levels_and_off_ingredients(self):
+        mix = Mix()
+        wish = "a-place-for-fireflies"
+        gaps = self.garden.wish_gaps(wish, mix)
+        self.assertEqual(len(gaps), 2)
+        self.assertIn("Raise Bells LEVEL to 60%", gaps[0])
+        self.assertIn("Lower Rain LEVEL to 45%", gaps[1])
+        mix.levels[2] = .8
+        mix.enabled[2] = False
+        self.assertIn("Switch Bells ON", self.garden.wish_gaps(wish, mix)[0])
+        mix.enabled[2] = True
+        mix.levels[0] = .45
+        self.assertEqual(self.garden.wish_gaps(wish, mix), [])
+        self.assertTrue(self.garden.matching(wish, mix))
 
     def test_round_trip_preserves_cards_progress_and_earlier_snapshots(self):
         card = self.garden.save_card("My garden", self.mix(0))

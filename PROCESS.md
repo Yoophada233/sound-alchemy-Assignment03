@@ -194,6 +194,112 @@ actual direct feedback, but it is not the brief's other-person trial.
   main activity. The student preferred low-pressure visual exploration, so exact
   auditory comparison and numerical similarity scoring were left out.
 
+## Clarify silent ingredient controls / 22 October 2026
+
+The student tried increasing DROPS while Rain LEVEL was zero and expected a
+sound. A second screenshot showed the same issue across all three ingredients.
+Although the sound generation worked, the UI made the lower parameter look like
+an independent source. The student asked for better hints and disabled lower
+controls when LEVEL reaches zero.
+
+The three cards now label the upper slider VOLUME / LEVEL. When its ingredient
+has LEVEL zero or is OFF, the lower control has a grey DISABLED state and a
+specific recovery instruction. Both mouse presses and parameter updates reject
+disabled adjustments, retaining the previous value until re-enabled. Level and
+ON/OFF controls remain available. MASTER does not disable the garden's creative
+controls, and editing while playback is stopped still works.
+
+This change responds to direct student feedback. It does not complete the
+separate-person user trial. Synthesis and stored recipe formats are unchanged.
+
+## Make rejected sharing visible / 23 October 2026
+
+The student reported that clicking Share this garden with an unsuitable recipe
+appeared to do nothing. The implementation previously changed only the footer
+message while the visitor card and button remained visually identical.
+
+The revision adds an orange NOT QUITE YET panel inside the visitor card, a count
+of unmet conditions and one specific LEVEL or ON/OFF adjustment to try. A short
+border pulse acknowledges each rejected click, including repeated attempts.
+The text stays visible after the animation and clears on a control edit or a
+different note. A correct submission shows the existing thank-you stamp.
+
+The matching check and adjustment text now share the same threshold table,
+retaining the existing inclusive acceptance ranges. A completed-note guard
+prevents a rapid second click from being treated as a rejected submission.
+No new sound effect, dependency, saved-data field or synthesis change was added.
+This responds to the student's direct feedback; an observed other-person trial
+remains pending.
+
+## Fresh visits instead of remembered progress / 23 October 2026
+
+The student wanted each new visitor to begin with unfinished wishes and an empty
+collection, rather than inherit an already completed experience. This changes
+the earlier decision to restore collection snapshots automatically.
+
+Normal startup now creates an in-memory Garden with no storage folder. Discoveries,
+visitor stamps and kept cards remain useful within one window but disappear when
+it closes. A new launch restores the initial sound controls and empty progress.
+Normal gameplay no longer writes collection snapshots. The naming dialog and
+collection area explain the visit lifetime. Reset still resets sound controls
+within the current visit, retaining its progress until the window closes.
+
+Old snapshot files are not deleted or changed, and exported WAVs/recipes remain
+on disk. The model retains explicit-folder archive helpers for existing files
+and their validation checks; the application does not invoke these helpers.
+Tests now distinguish restoring a card within a visit from starting a fresh
+window, including a pre-existing archive containing all completed goals.
+
+This is direct student feedback, not an observed separate-person trial. The
+older persistence notes above describe the earlier implementation and are
+superseded by this visit-based behavior.
+
+## Noticeable unlocks and more discoveries / 23 October 2026
+
+The student reported that discoveries could unlock without being noticed and
+asked for a prominent effect and more collectibles. The revision adds a named
+NEW DISCOVERY banner, a bounded garden celebration and a pulsing NEW! border
+around its field-guide card. The notice has a View card button and a dismiss
+control. Rapid discoveries queue rather than replace each other; naming pauses
+the notice timer. Editing, keeping a first garden and completing a first wish
+all use the same notification path, with one reward per discovery per visit.
+
+Four discoveries were appended: Storm roots, Crystal rain, Starlit canopy and
+Amber reeds. They occupy previously unclassified recipe ranges, retaining the
+original four named recipes and the three broad visitor wishes. Each has a
+distinct procedural addition: rain clouds/glowing roots, blue crystals, linked
+stars/leaf canopy or golden reeds. The guide now pages through eight cards.
+
+The visuals work without speaker playback and do not alter the sound generator.
+The application retains a fresh visit at every launch, including an empty
+notification queue and no rewarded cards. Existing snapshots and exported audio
+are not deleted. No sound effect, asset pack, account or dependency was added.
+
+Codex implemented the UI/queue and used assistant agents for the model tests and
+procedural drawing. Automated interaction/model tests and scripted renderings
+check behavior; a person-observed engagement trial is still pending.
+
+## Mist greenhouse art direction / 23 October 2026
+
+The student found the large pale-yellow background unattractive and asked for
+visual packaging that fits the sound-garden theme. The assistant chose a light
+mist-green greenhouse direction: a cool sage gradient, diffuse light, botanical
+edge drawings and faint wave rings. Dark green text and the existing sound-layer
+accents remain distinct; the visitor and ingredient surfaces share the new
+palette and soft cached shadows. Disabled buttons received clearer muted text.
+
+The backdrop is generated once from Python/Pygame geometry and reused. Its
+decoration is confined mainly to margins; it has no input events or animation.
+The assistant used a drawing agent for the new backdrop and a read-only check
+of the integrated screenshots. Controls, hitboxes, game rules, sound synthesis
+and per-visit reset behavior were retained. No image pack or new dependency was
+needed. Current screenshots and feedback examples were refreshed to match.
+
+The default, muted, rejected-share, unlock and naming views were inspected for
+readability. Existing interaction tests were rerun; no tests were added merely
+to assert the new palette. The student's visual preference and another-person
+trial remain human judgments.
+
 ## AI tools and authorship
 
 **Codex** was used to brainstorm, inspect local course examples, propose the
