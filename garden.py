@@ -57,7 +57,8 @@ WISH_LIMITS = {
 def effective_levels(mix):
     """Creative matching follows ingredient controls, independent of listening volume."""
     validate(mix)
-    return tuple(level if on else 0.0 for level, on in zip(mix.levels, mix.enabled))
+    return tuple(level if on and (index != 2 or any(mix.flower_steps)) else 0.0
+                 for index, (level, on) in enumerate(zip(mix.levels, mix.enabled)))
 
 
 def scene_for(mix):
@@ -117,6 +118,13 @@ def recipe_mix(recipe):
     if not isinstance(recipe.get("rain_model"), str) or not recipe["rain_model"]:
         raise ValueError("The saved rain model is invalid.")
     mix = Mix()
+    # Version 1 archives predate the flower melody; use the current starter rhythm.
+    if "flower_steps" in recipe:
+        steps = recipe["flower_steps"]
+        if (not isinstance(steps, list) or len(steps) != 4
+                or any(type(value) is not bool for value in steps)):
+            raise ValueError("The saved flower melody is invalid.")
+        mix.flower_steps = steps.copy()
     mix.levels = recipe["levels"].copy()
     mix.character = recipe["character"].copy()
     mix.enabled = enabled.copy()
@@ -240,6 +248,8 @@ class Garden:
             if value < minimum:
                 if not mix.enabled[index]:
                     gaps.append(f"Switch {name} ON and set LEVEL to {round(minimum * 100)}% or more.")
+                elif index == 2 and not any(mix.flower_steps):
+                    gaps.append(f"Light at least one flower and set Bells LEVEL to {round(minimum * 100)}% or more.")
                 else:
                     gaps.append(f"Raise {name} LEVEL to {round(minimum * 100)}% or more (now {round(value * 100)}%).")
             elif value > maximum:

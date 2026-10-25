@@ -15,7 +15,8 @@ os.environ["SDL_AUDIODRIVER"] = "dummy"
 os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "1"
 
 import pygame
-from app import Lab
+from app import Lab, VISITOR_RECT, GARDEN_RECT
+from garden_view import flower_targets
 from sound import mix_layers, pcm_bytes
 
 HERE = Path(__file__).resolve().parent
@@ -37,7 +38,18 @@ class InteractionTests(unittest.TestCase):
         self.lab.draw()
 
     def click(self, key):
+        if key[0] in ("save", "folder") and not self.lab.tools_open:
+            self.click(("tools", 0))
+            self.lab.draw()
+        if key[0] in ("wish", "next_wish") and not self.lab.letter_open:
+            self.click(("letter", 0))
+            self.lab.draw()
         point = self.lab.buttons[key].center
+        self.lab.event(pygame.event.Event(pygame.MOUSEBUTTONDOWN, button=1, pos=point))
+        self.lab.event(pygame.event.Event(pygame.MOUSEBUTTONUP, button=1, pos=point))
+
+    def click_flower(self, index):
+        point = flower_targets(GARDEN_RECT, self.lab.mix)[index].center
         self.lab.event(pygame.event.Event(pygame.MOUSEBUTTONDOWN, button=1, pos=point))
         self.lab.event(pygame.event.Event(pygame.MOUSEBUTTONUP, button=1, pos=point))
 
@@ -288,8 +300,8 @@ class InteractionTests(unittest.TestCase):
         with patch.object(self.lab, "text", wraps=self.lab.text) as text:
             self.lab.draw()
         labels = [call.args[0] for call in text.call_args_list]
-        self.assertIn("NEW DISCOVERY!", labels)
-        self.assertIn("NEW! / click for its recipe hint", labels)
+        self.assertIn("SPECIMEN 01 / COLLECTED", labels)
+        self.assertIn("NEW", labels)
         self.assertFalse(self.lab.playing)
         self.assertFalse(pygame.mixer.get_busy())
         self.click(("discovery_close", 0))
@@ -316,7 +328,8 @@ class InteractionTests(unittest.TestCase):
         self.lab.draw()
         self.click(("discovery_view", 0))
         self.assertEqual(self.lab.collection_tab, "guide")
-        self.assertEqual(self.lab.guide_page, 0)
+        self.lab.draw()
+        self.assertTrue(all(("guide", index) in self.lab.buttons for index in range(8)))
         self.assertEqual(len(self.lab.garden.cards), 1)
 
     def test_first_discovery_from_a_wish_is_announced_with_its_stamp(self):
@@ -325,19 +338,15 @@ class InteractionTests(unittest.TestCase):
         self.assertEqual(self.lab.discovery_current, "rainy-moss")
         self.assertIn("a-soft-rain", self.lab.garden.completed)
 
-    def test_second_discovery_page_has_hints_and_new_unlocks_reveal_the_correct_page(self):
-        self.click(("guide_page", 1))
-        self.lab.draw()
-        self.assertNotIn(("guide", 0), self.lab.buttons)
+    def test_all_specimens_have_hints_and_new_unlocks_stay_visible_without_paging(self):
+        self.assertIn(("guide", 0), self.lab.buttons)
         self.assertIn(("guide", 7), self.lab.buttons)
         self.click(("guide", 7))
         self.assertIn("Pitch", self.lab.message)
-        self.click(("guide_page", -1))
         self.lab.mix.levels = [.3, .45, .25]
         self.lab.mix.character[1] = .8
         self.lab.changed("Grow amber reeds.")
         self.assertEqual(self.lab.discovery_current, "amber-reeds")
-        self.assertEqual(self.lab.guide_page, 1)
         self.lab.draw()
         self.assertIn(("guide", 7), self.lab.buttons)
 
@@ -453,7 +462,8 @@ class InteractionTests(unittest.TestCase):
         with patch.object(self.lab, "text", wraps=self.lab.text) as text:
             self.lab.draw()
         panel_text = [call.args[0] for call in text.call_args_list
-                      if call.args[1] == 869 and 250 <= call.args[2] <= 330]
+                      if call.args[1] == VISITOR_RECT.x + 18
+                      and VISITOR_RECT.y + 150 <= call.args[2] <= VISITOR_RECT.y + 240]
         self.assertTrue(any("NOT QUITE YET" in line for line in panel_text))
         self.assertTrue(any("Raise Rain LEVEL" in line for line in panel_text))
         self.lab.wish_error_at -= 2
@@ -528,7 +538,9 @@ class InteractionTests(unittest.TestCase):
         self.assertIsNone(self.lab.active_wish)
         self.assertEqual(self.lab.wish_index, 0)
         self.assertEqual(self.lab.card_page, 0)
-        self.assertEqual(self.lab.guide_page, 0)
+        self.assertFalse(self.lab.letter_open)
+        self.assertFalse(self.lab.tools_open)
+        self.assertFalse(self.lab.garden_thumbnails)
         self.assertIsNone(self.lab.discovery_current)
         self.assertFalse(self.lab.discovery_queue)
         self.assertFalse(self.lab.discovery_highlights)
@@ -574,6 +586,238 @@ class InteractionTests(unittest.TestCase):
         self.assertNotEqual(original, bare)
         draw_garden(surface, surface.get_rect(), self.lab.mix, 2.0)
         self.assertEqual(bare, pygame.image.tobytes(surface, "RGB"))
+
+    def test_optional_panels_open_on_demand_and_escape_returns_to_the_garden(self):
+        self.assertNotIn(("wish", 0), self.lab.buttons)
+        self.assertNotIn(("save", 0), self.lab.buttons)
+        self.click(("letter", 0))
+        self.lab.draw()
+        self.assertIn(("wish", 0), self.lab.buttons)
+        self.click(("tools", 0))
+        self.lab.draw()
+        self.assertFalse(self.lab.letter_open)
+        self.assertNotIn(("wish", 0), self.lab.buttons)
+        self.assertIn(("save", 0), self.lab.buttons)
+        # The export popover overlaps specimens: it must receive the click.
+        self.click(("save", 0))
+        self.assertIsNotNone(self.lab.last_saved)
+        self.lab.event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_ESCAPE))
+        self.lab.draw()
+        self.assertFalse(self.lab.tools_open)
+        self.assertNotIn(("save", 0), self.lab.buttons)
+
+    def test_kept_thumbnail_uses_its_saved_recipe_and_survives_later_edits(self):
+        from garden_view import draw_garden
+        self.lab.begin_keep()
+        self.lab.finish_keep()
+        self.lab.draw()
+        first = self.lab.garden.cards[0]
+        thumbnail = self.lab.garden_thumbnails[first["id"]]
+        expected = pygame.Surface(thumbnail.get_size())
+        draw_garden(expected, expected.get_rect(), self.lab.garden.restore(first["id"]), 1.25)
+        pixels = pygame.image.tobytes(thumbnail, "RGB")
+        self.assertEqual(pixels, pygame.image.tobytes(expected, "RGB"))
+        self.lab.choose_preset("Night orbit")
+        self.lab.begin_keep()
+        self.lab.finish_keep()
+        self.lab.draw()
+        second = self.lab.garden.cards[1]
+        self.assertNotEqual(pixels, pygame.image.tobytes(self.lab.garden_thumbnails[second["id"]], "RGB"))
+        self.assertEqual(pixels, pygame.image.tobytes(self.lab.garden_thumbnails[first["id"]], "RGB"))
+
+    def test_disabled_export_controls_and_empty_popover_paper_do_not_restore_cards_below(self):
+        for name in ("One", "Two", "Three", "Four"):
+            self.lab.garden.save_card(name, self.lab.mix)
+        self.lab.collection_tab = "cards"
+        self.lab.tools_open = True
+        self.lab.ready_revision = -1
+        self.lab.draw()
+        self.assertNotIn(("save", 0), self.lab.buttons)
+        self.assertNotIn(("folder", 0), self.lab.buttons)
+        with patch.object(self.lab, "restore_garden") as restore:
+            for point in ((1100, 807), (1100, 850), (950, 820)):
+                self.lab.event(pygame.event.Event(pygame.MOUSEBUTTONDOWN, button=1, pos=point))
+            restore.assert_not_called()
+
+    def test_visual_rhythm_keeps_the_audible_pattern_until_the_worker_is_ready(self):
+        self.click(("play", 0))
+        audible = self.lab.rhythm_character
+        origin = self.lab.play_origin
+        self.lab.mix.character[2] = 1
+        self.lab.changed("Change the bell pattern.", discover=False)
+        with patch("app.draw_garden") as renderer:
+            self.lab.draw()
+        self.assertEqual(tuple(renderer.call_args.kwargs["rhythm_mix"].character), audible)
+        self.assertEqual(self.lab.play_origin, origin)
+        self.wait_ready()
+        self.assertEqual(self.lab.rhythm_character, tuple(self.lab.mix.character))
+        self.assertGreater(self.lab.play_origin, origin)
+
+    def test_letterboxed_window_maps_clicks_to_the_new_layout(self):
+        from app import SIZE
+        self.lab.screen = pygame.display.set_mode((960, 600), pygame.RESIZABLE)
+        self.lab.draw()
+        rect = self.lab.buttons[("letter", 0)]
+        scale = min(960 / SIZE[0], 600 / SIZE[1])
+        physical = ((960 - SIZE[0] * scale) / 2 + rect.centerx * scale,
+                    (600 - SIZE[1] * scale) / 2 + rect.centery * scale)
+        self.lab.event(pygame.event.Event(pygame.MOUSEBUTTONDOWN, button=1, pos=physical))
+        self.assertTrue(self.lab.letter_open)
+
+    def test_queued_play_has_no_sound_driven_lights_before_the_audio_starts(self):
+        self.lab.choose_preset("Night orbit")
+        self.click(("play", 0))
+        self.assertTrue(self.lab.playing)
+        self.assertFalse(self.lab.audio_started)
+        with patch("app.draw_garden") as renderer:
+            self.lab.draw()
+        self.assertFalse(renderer.call_args.args[4])
+        self.wait_ready()
+        self.assertTrue(self.lab.audio_started)
+        self.click(("play", 0))
+        self.assertFalse(self.lab.audio_started)
+        # A previous successful loop must not become the clock of a queued restart.
+        self.lab.choose_preset("Glass garden")
+        self.click(("play", 0))
+        self.assertTrue(self.lab.playing)
+        self.assertFalse(self.lab.audio_started)
+        self.assertIsNotNone(self.lab.rhythm_character)
+        with patch("app.draw_garden") as renderer:
+            self.lab.draw()
+        self.assertFalse(renderer.call_args.args[4])
+        self.wait_ready()
+        self.assertTrue(self.lab.audio_started)
+
+    def test_clicking_a_flower_edits_the_real_bell_samples_without_autoplay(self):
+        before = self.lab.layers[2]
+        self.assertEqual(self.lab.mix.flower_steps, [True, False, True, False])
+        self.click_flower(1)
+        self.assertEqual(self.lab.mix.flower_steps, [True, True, True, False])
+        self.assertFalse(self.lab.playing)
+        self.assertIn("Press Play", self.lab.message)
+        self.wait_ready()
+        self.assertNotEqual(before, self.lab.layers[2])
+
+    def test_live_flower_edit_keeps_the_rain_bass_buffers_and_playback_clock(self):
+        self.click(("play", 0))
+        origin = self.lab.play_origin
+        channels = [pygame.mixer.Channel(self.lab.audio.bank * 3 + index) for index in (0, 1)]
+        sounds = [channel.get_sound() for channel in channels]
+        layers = self.lab.layers[:2]
+        with patch.object(self.lab.audio, "play", wraps=self.lab.audio.play) as restart:
+            with patch.object(self.lab.audio, "replace_bells", wraps=self.lab.audio.replace_bells) as replace:
+                self.click_flower(1)
+                self.wait_ready()
+                restart.assert_not_called()
+                replace.assert_called_once()
+        self.assertEqual(self.lab.play_origin, origin)
+        self.assertEqual(self.lab.rhythm_steps, tuple(self.lab.mix.flower_steps))
+        for index, channel in enumerate(channels):
+            self.assertIs(channel.get_sound(), sounds[index])
+            self.assertIs(self.lab.layers[index], layers[index])
+
+    def test_bell_replacement_buffer_begins_at_the_current_loop_sample(self):
+        from sound import HEADROOM, SAMPLE_RATE
+        self.click(("play", 0))
+        origin = 100.0
+        with patch("app.time.monotonic", return_value=101.25):
+            self.assertTrue(self.lab.audio.replace_bells(self.lab.layers, self.lab.mix, origin))
+        data = pcm_bytes([value * HEADROOM for value in self.lab.layers[2]])
+        offset = round(1.25 * SAMPLE_RATE) * 2
+        self.assertEqual(self.lab.audio.sounds[self.lab.audio.bell_channel].get_raw(),
+                         data[offset:] + data[:offset])
+
+    def test_rapid_flower_edits_and_volume_changes_accept_only_the_latest_pattern(self):
+        self.click(("play", 0))
+        origin = self.lab.play_origin
+        self.click_flower(1)
+        self.lab.last_edit = 0
+        self.lab.update()
+        self.click_flower(3)
+        self.lab.mix.master = .25
+        self.lab.changed("Latest gain while arranging flowers.", discover=False)
+        self.wait_ready()
+        self.assertEqual(self.lab.layer_steps, (True, True, True, True))
+        self.assertEqual(self.lab.rhythm_steps, self.lab.layer_steps)
+        self.assertEqual(self.lab.play_origin, origin)
+        self.assertEqual(self.lab.samples, mix_layers(self.lab.layers, self.lab.mix))
+
+    def test_muted_bells_block_flower_edits_but_master_zero_allows_composition(self):
+        initial = self.lab.mix.flower_steps.copy()
+        for off in (False, True):
+            self.lab.mix.enabled[2] = not off
+            self.lab.mix.levels[2] = .2 if off else 0
+            self.click_flower(1)
+            self.assertEqual(self.lab.mix.flower_steps, initial)
+            self.assertIn("Bells", self.lab.message)
+        self.lab.mix.enabled[2] = True
+        self.lab.mix.levels[2] = .2
+        self.lab.mix.master = 0
+        self.click_flower(1)
+        self.assertTrue(self.lab.mix.flower_steps[1])
+        self.assertIn("MASTER", self.lab.message)
+
+    def test_four_resting_flowers_stop_bells_only_playback_and_explain_recovery(self):
+        self.lab.mix.enabled = [False, False, True]
+        self.lab.changed("Bells solo.", discover=False)
+        self.click(("play", 0))
+        self.click_flower(0)
+        self.click_flower(2)
+        self.assertFalse(any(self.lab.mix.flower_steps))
+        self.assertFalse(self.lab.playing)
+        self.assertIn("numbered flower", self.lab.message)
+        self.click_flower(1)
+        self.assertFalse(self.lab.playing)
+        self.assertIn("Press Play", self.lab.message)
+
+    def test_presets_keep_the_melody_and_reset_restores_the_default(self):
+        self.click_flower(1)
+        pattern = self.lab.mix.flower_steps.copy()
+        self.lab.choose_preset("Night orbit")
+        self.assertEqual(self.lab.mix.flower_steps, pattern)
+        self.lab.reset()
+        self.assertEqual(self.lab.mix.flower_steps, [True, False, True, False])
+
+    def test_saved_flower_melody_restores_and_exports_the_exact_recipe(self):
+        import json
+        import wave
+        self.click_flower(1)
+        self.click_flower(0)
+        self.lab.begin_keep()
+        self.lab.finish_keep()
+        card = self.lab.garden.cards[0]
+        pattern = self.lab.mix.flower_steps.copy()
+        self.click_flower(3)
+        self.lab.restore_garden(card["id"])
+        self.wait_ready()
+        self.assertEqual(self.lab.mix.flower_steps, pattern)
+        self.lab.export()
+        recipe = json.loads(self.lab.last_saved.with_suffix(".json").read_text(encoding="utf-8"))
+        self.assertEqual(recipe["flower_steps"], pattern)
+        with wave.open(str(self.lab.last_saved), "rb") as audio:
+            self.assertEqual(audio.readframes(audio.getnframes()), pcm_bytes(self.lab.samples) * 2)
+
+    def test_letter_and_naming_dialog_prevent_clicks_from_editing_covered_flowers(self):
+        pattern = self.lab.mix.flower_steps.copy()
+        self.click(("letter", 0))
+        self.lab.draw()
+        self.click_flower(3)
+        self.assertEqual(self.lab.mix.flower_steps, pattern)
+        self.lab.letter_open = False
+        self.lab.begin_keep()
+        self.lab.draw()
+        self.click_flower(0)
+        self.assertEqual(self.lab.mix.flower_steps, pattern)
+
+    def test_waking_a_flower_can_discover_a_recipe_that_needed_bells(self):
+        self.lab.mix.levels = [.1, .2, .8]
+        self.lab.mix.flower_steps = [False] * 4
+        self.lab.changed("A quiet grove.", discover=False)
+        self.assertNotIn("firefly-grove", self.lab.garden.discovered)
+        self.click_flower(1)
+        self.assertIn("firefly-grove", self.lab.garden.discovered)
+        self.assertEqual(self.lab.discovery_current, "firefly-grove")
+
 
 
 if __name__ == "__main__":

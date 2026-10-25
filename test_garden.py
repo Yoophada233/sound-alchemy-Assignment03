@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from garden import Garden, SCENES, WISHES, effective_levels, scene_for
+from garden import Garden, SCENES, WISHES, effective_levels, recipe_mix, scene_for
 from sound import Mix
 
 HERE = Path(__file__).resolve().parent
@@ -140,6 +140,92 @@ class GardenTests(unittest.TestCase):
         self.assertEqual(restored.levels, list(RECIPES[0]))
         restored.enabled[0] = False
         self.assertTrue(self.garden.restore(card["id"]).enabled[0])
+
+    def test_flower_melody_survives_cards_archives_and_independent_copies(self):
+        mix = self.mix(2)
+        mix.flower_steps = [False, True, True, True]
+        card = self.garden.save_card("My four flowers", mix)
+        mix.flower_steps[1] = False
+        card["recipe"]["flower_steps"][2] = False
+        restored = self.garden.restore(card["id"])
+        self.assertEqual(restored.flower_steps, [False, True, True, True])
+        restored.flower_steps[3] = False
+        self.assertEqual(self.garden.restore(card["id"]).flower_steps,
+                         [False, True, True, True])
+        self.garden.persist()
+        loaded = Garden(self.folder)
+        self.assertEqual(loaded.restore(card["id"]).flower_steps,
+                         [False, True, True, True])
+        self.assertEqual(loaded.cards[0]["scene"], "firefly-grove")
+
+    def test_recipe_melody_is_copied_and_missing_legacy_field_uses_default(self):
+        recipe = self.mix(0).settings()
+        recipe["flower_steps"] = [True, True, False, False]
+        restored = recipe_mix(recipe)
+        recipe["flower_steps"][0] = False
+        self.assertEqual(restored.flower_steps, [True, True, False, False])
+        recipe.pop("flower_steps")
+        legacy = recipe_mix(recipe)
+        self.assertEqual(legacy.flower_steps, Mix().flower_steps)
+        legacy.flower_steps[0] = False
+        self.assertEqual(recipe_mix(recipe).flower_steps, Mix().flower_steps)
+
+    def test_version_one_archives_without_melody_remain_readable(self):
+        card = self.garden.save_card("An earlier garden", self.mix(2))
+        path = self.garden.persist()
+        legacy = json.loads(path.read_text(encoding="utf-8"))
+        legacy["cards"][0]["recipe"].pop("flower_steps")
+        (self.folder / "collection-99999999999999999999.json").write_text(
+            json.dumps(legacy), encoding="utf-8")
+        loaded = Garden(self.folder)
+        self.assertEqual(loaded.warning, "")
+        self.assertEqual(loaded.restore(card["id"]).flower_steps, Mix().flower_steps)
+        migrated = loaded.persist()
+        self.assertEqual(json.loads(migrated.read_text(encoding="utf-8"))["version"], 1)
+        self.assertIn("flower_steps", loaded.cards[0]["recipe"])
+
+    def test_malformed_saved_flower_patterns_are_rejected(self):
+        malformed = (None, "1010", (), (True, False, True, False), [],
+                     [True] * 3, [True] * 5, [True, 0, False, False],
+                     [True, 1.0, False, False], [True, "on", False, False])
+        for steps in malformed:
+            with self.subTest(steps=steps):
+                recipe = self.mix(0).settings()
+                recipe["flower_steps"] = steps
+                with self.assertRaisesRegex(ValueError, "flower melody"):
+                    recipe_mix(recipe)
+
+    def test_unlit_flowers_are_silent_for_discoveries_wishes_and_saving(self):
+        mix = self.mix(2)
+        mix.levels = [0, 0, .8]
+        mix.flower_steps = [False] * 4
+        self.assertEqual(effective_levels(mix), (0, 0, 0))
+        self.assertIsNone(self.garden.discover(mix))
+        self.assertFalse(self.garden.matching("a-place-for-fireflies", mix))
+        self.assertFalse(self.garden.complete("a-place-for-fireflies", mix))
+        self.assertIn("Light at least one flower",
+                      self.garden.wish_gaps("a-place-for-fireflies", mix)[0])
+        with self.assertRaisesRegex(ValueError, "Add at least one sound"):
+            self.garden.save_card("No sounding flowers", mix)
+        self.assertEqual(self.garden.cards, [])
+        self.assertEqual(self.garden.discovered, set())
+        self.assertEqual(self.garden.completed, set())
+        # Listening volume is still independent of the user's creative recipe.
+        mix.flower_steps[3] = True
+        mix.master = 0
+        self.assertTrue(self.garden.matching("a-place-for-fireflies", mix))
+        self.assertEqual(self.garden.save_card("A silent preview", mix)["scene"],
+                         "firefly-grove")
+
+    def test_unlit_flowers_do_not_prevent_low_bell_recipes(self):
+        mix = self.mix(0)
+        mix.levels[2] = 1
+        mix.flower_steps = [False] * 4
+        self.assertEqual(scene_for(mix), "rainy-moss")
+        self.assertTrue(self.garden.matching("a-soft-rain", mix))
+        self.assertTrue(self.garden.complete("a-soft-rain", mix))
+        self.assertEqual(self.garden.save_card("Rain without chimes", mix)["scene"],
+                         "rainy-moss")
 
     def test_duplicate_names_get_unique_ids(self):
         with patch("garden.time.time_ns", return_value=123):

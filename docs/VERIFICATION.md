@@ -1,17 +1,116 @@
-# Verification / 22 October 2026
+# Verification / 22–25 October 2026
 
 ## Environment
 
 - Windows desktop; display driver reported by Pygame: `windows`.
-- Desktop size reported: 1920 x 1080; current garden canvas: 1280 x 900.
-  The earlier listening-lab canvas was 1180 x 860.
+- Desktop size reported: 1920 x 1080; current notebook canvas: 1280 x 960.
+  The earlier garden canvas was 1280 x 900; the listening lab was 1180 x 860.
 - Project-local CPython 3.12.14; Pygame 2.6.1.
 - Audio format accepted by the local mixer: 22,050 Hz, signed 16-bit, mono.
 - Source and generated files remained in the new `sound-alchemy/` folder.
   Dependencies/cache and Python were placed in `.uv-cache/` and `.python/`.
-  No Git init, commit, push, public deployment or Canvas submission was performed.
+  Individual historical sections describe their own modification boundaries;
+  this record is not evidence of a Canvas submission or a live website.
 
 ## Executed checks
+
+### Four flowers, one melody / 25 October 2026
+
+The four numbered foreground flowers now select bells at seconds 0, 1, 2 and 3
+of each loop. The default sounds flowers 1 and 3. Sparkle changes the existing
+bell decay and garden glow without replacing the chosen beat pattern. Presets
+retain the melody; Reset restores it. This supersedes the automatic bell-count
+behaviour described in earlier entries below.
+
+- **126 checks passed:** 54 UI/event tests, 31 garden-model tests, 12 sound tests,
+  10 earlier rhythm tests, 9 four-beat audio tests and 10 flower-view tests.
+  UI checks use silent SDL devices; they are not evidence of another person's
+  experience. Mocked export/folder errors intentionally print their messages.
+- Audio checks cover all 16 flower combinations, exact one-second sample starts,
+  silent rests, independent Sparkle decay, saved recipe copies and the same
+  pattern in live/export rendering. Rain(.62) and Bass(0) retain their previous
+  PCM digests. Legacy helper calls also retain twelve original bell-loop digests;
+  the new app intentionally uses the four editable beats instead.
+- Live-edit checks confirm that only the Bells buffer is replaced, rotated to
+  the current loop sample. Rain/Bass buffers and their channels are reused,
+  and the original playback clock remains unchanged. The latest rapid edit wins;
+  stopping during generation stays stopped. Pending visuals follow the audible
+  steps while showing the newly selected petals.
+- Four stable hit areas use the same proportional stage geometry as the drawing.
+  Wide/tall/small stages, rests without renumbering, muted/paused gestures,
+  Master-independent preview and the four-second firefly wrap are checked.
+  Letter and naming overlays prevent edits to covered flowers.
+- Cards and exported JSON include four copied booleans. Missing fields in old
+  recipes migrate to the new default; malformed fields are rejected. All four
+  resting flowers count as absent Bells for wishes/discoveries. Recovery text
+  asks for a lit flower. Master zero still permits composing and keeping a card.
+- A native Windows/mixer check started playback, clicked flower 2 through the
+  real event handler, accepted the updated melody and retained Rain/Bass Sound
+  objects and playback origin. Stop then left no active playback. A 65-frame
+  measurement averaged 36.16 ms during concurrent automated checks; this is not
+  a performance guarantee or subjective listening assessment.
+- Current screenshots and silent GIFs were generated from the app renderer.
+  `flower-melody.gif` illustrates a four-second phrase; `flower-melody.wav` is
+  a separate eight-second, mono, 16-bit, 22,050 Hz synthesized example.
+- The Windows source launcher generated `out/four-flower-launcher.png`
+  successfully. Updated default, muted, letter, unlock and melody canvases were
+  visually checked for control labels, numbering and overlay placement.
+- Recovery snapshots in both local project folders:
+  `.backups/before-four-flower-melody-20261025-133112/`.
+  No Git commit/push or human trial is claimed for this revision.
+
+### Night greenhouse and specimen notebook / 25 October 2026
+
+This revision reorganises the app into a 1280 x 960 garden stage, a shared sound
+workbench and a shelf of eight distinctive botanical specimens. Visitor letters
+and export tools open on demand. Kept cards depict their saved recipes. Bell
+onsets/decays and bass strength share timing helpers between sound and visuals;
+audio samples remain unchanged in the comparisons below.
+
+- `specimens.py` was rendered with all eight found and unobserved motifs at
+  52 x 50 and 116 x 112 and the resulting gallery was visually inspected.
+  Distinct silhouettes remain visible before discovery. Drawing restores the
+  caller's clip; checks also exercised a restricted clip and the flight's
+  inactive/active/finished elapsed times without errors.
+- A local 200-iteration drawing measurement averaged about 2.45 ms for all eight
+  100 x 90 specimens together. This is an implementation measurement on the
+  development computer, not a promise for other devices.
+- The gallery remains under ignored `out/specimen-art-review-20261025.png`.
+  The new illustrations and leaf flight use Pygame geometry, with no image
+  dependency, files read at runtime or persistent particle state.
+- All **91 automated checks passed** with the project-local Python 3.12 runtime:
+  44 UI/event tests, 25 garden tests, 12 sound tests and 10 rhythm tests.
+  The UI suite uses SDL dummy devices. It covers all eight visible specimen
+  hints, recipe-derived thumbnails that survive later edits, panel opening and
+  closing, letterboxed pointer mapping, and disabled export controls covering
+  the collection below. Existing muted controls, wrong-share recovery, naming,
+  fresh visits and export-error checks still pass.
+- Playback-origin checks confirm that gain changes preserve the running clock;
+  pending character changes follow the currently audible pattern until the new
+  loop starts. A queued first play or restart shows silent preparation until
+  audio actually starts. Stopping clears the audio-started state.
+- Direct before/after comparison against the recovery snapshot found all
+  **18 raw float64 sample loops byte-identical**: three Rain densities, three
+  Bass pitches and twelve Bells sparkle/pitch combinations. The rhythm tests
+  also retain twelve complete bell-loop PCM digests. This revision changes
+  feedback scheduling, not the sound design.
+- Current default, disabled-control, rejected-letter, unlock, full-specimen and
+  kept-thumbnail canvases were rendered and visually inspected. Main examples
+  are `screenshot.png`, `controls-muted.png`, `wish-feedback.png`,
+  `discovery-unlocked.png`, `field-notes.png` and `kept-gardens.png`. The two GIFs
+  were regenerated from scripted application frames; they are not human trials.
+- `start.cmd --screenshot out/launcher-notebook.png` succeeded. A separate native
+  Windows check opened the 1280 x 960 window on a 1920 x 1080 desktop, started
+  the 22,050 Hz / signed 16-bit / mono mixer and confirmed active playback, then
+  confirmed no active playback after Stop. Forty-two native draw/update frames
+  averaged 21.28 ms in that run. This is a device/API check, not a listening
+  assessment or a physical-mouse usability trial.
+- Recovery snapshot: `.backups/before-specimen-notebook-20261025-122030/`.
+  The human trial is still pending. Rendered captures and event tests must not
+  be described as a person's aesthetic, listening or usability judgment.
+
+Paged-guide descriptions below are historical iteration evidence. The notebook
+now shows all eight specimens at once; the linked screenshots/GIFs were refreshed.
 
 ### Mist greenhouse visual packaging / 23 October 2026
 
@@ -231,5 +330,6 @@ asset and remains outside the shareable project materials.
   like plastic knocks. V3 was also rejected. V4 was fitted to their concrete
   Minecraft reference; listening acceptance remains pending. Spectral/statistical
   agreement cannot establish naturalness, pleasantness or exact reproduction.
-- Public repository access, Git history and submission requirements remain pending.
+- This document does not establish that the latest revision is present remotely,
+  that signed-out public access works, or that its URL has been submitted on Canvas.
 

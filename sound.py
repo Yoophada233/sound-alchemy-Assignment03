@@ -24,6 +24,7 @@ RAIN_FILTERS = (
 HEADROOM = 0.25
 PITCHES = (110.0, 123.4708, 130.8128, 146.8324, 164.8138, 195.9977, 220.0)
 NOTE_NAMES = ("A2", "B2", "C3", "D3", "E3", "G3", "A3")
+FLOWER_NOTES = (0, 7, 12, 4)
 PRESETS = {
     "Rainy window": ([0.78, 0.32, 0.20], [0.62, 0.0, 0.18]),
     "Night orbit": ([0.18, 0.68, 0.44], [0.12, 0.50, 0.38]),
@@ -39,6 +40,7 @@ class Mix:
         self.character = [0.62, 0.0, 0.18]
         self.enabled = [True, True, True]
         self.master = 0.70
+        self.flower_steps = [True, False, True, False]
 
     def copy(self):
         other = Mix()
@@ -46,6 +48,7 @@ class Mix:
         other.character = self.character.copy()
         other.enabled = self.enabled.copy()
         other.master = self.master
+        other.flower_steps = list(self.flower_steps)
         return other
 
     def preset(self, name):
@@ -55,12 +58,17 @@ class Mix:
         self.enabled = [True, True, True]
 
     def audible(self):
-        return self.master > 0 and any(on and level > 0
-                                      for on, level in zip(self.enabled, self.levels))
+        if self.master <= 0:
+            return False
+        for index, (on, level) in enumerate(zip(self.enabled, self.levels)):
+            if on and level > 0 and (index != 2 or any(self.flower_steps)):
+                return True
+        return False
 
     def settings(self):
         return {"levels": self.levels.copy(), "character": self.character.copy(),
                 "enabled": self.enabled.copy(), "master": self.master,
+                "flower_steps": list(self.flower_steps),
                 "sample_rate": SAMPLE_RATE, "loop_seconds": SECONDS, "seed": SEED,
                 "rain_model": RAIN_MODEL}
 
@@ -73,6 +81,9 @@ def validate(mix):
         raise ValueError("Each ingredient needs an on/off state.")
     if not math.isfinite(mix.master) or not 0 <= mix.master <= 1:
         raise ValueError("Master volume must be between zero and one.")
+    if (not isinstance(mix.flower_steps, (list, tuple)) or len(mix.flower_steps) != 4
+            or any(type(on) is not bool for on in mix.flower_steps)):
+        raise ValueError("The melody needs four on/off flower steps.")
 
 
 def fade_edges(samples):
@@ -153,28 +164,47 @@ def make_rain(density):
     return fade_edges([value * gain for value in samples])
 
 
+def bass_pulse(seconds):
+    """The one-second strength cycle shared by the bass and its visible roots."""
+    return 0.5 - 0.5 * math.cos(2 * math.pi * seconds)
+
+
+def bell_pattern(sparkle, flower_steps=None):
+    """Return the exact (sample onset, semitone) pairs in one four-second loop."""
+    if not math.isfinite(sparkle) or not 0 <= sparkle <= 1:
+        raise ValueError("Bell sparkle must be between zero and one.")
+    if flower_steps is not None:
+        if (not isinstance(flower_steps, (list, tuple)) or len(flower_steps) != 4
+                or any(type(on) is not bool for on in flower_steps)):
+            raise ValueError("The melody needs four on/off flower steps.")
+        return tuple((step * SAMPLE_RATE, FLOWER_NOTES[step])
+                     for step, on in enumerate(flower_steps) if on)
+    # Keep the original automatic pattern available for older course examples.
+    count = SAMPLE_RATE * SECONDS
+    notes = (0, 7, 12, 4, 9, 7, 4, 12)
+    number = 2 + round(sparkle * 6)
+    return tuple((round(note * count / number), notes[note]) for note in range(number))
+
+
 def make_bass(pitch):
     frequency = PITCHES[round(pitch * (len(PITCHES) - 1))]
     samples = []
     for i in range(SAMPLE_RATE * SECONDS):
         t = i / SAMPLE_RATE
-        pulse = 0.65 + 0.35 * (0.5 - 0.5 * math.cos(2 * math.pi * t))
+        pulse = 0.65 + 0.35 * bass_pulse(t)
         fundamental = math.sin(2 * math.pi * frequency * t)
         harmonic = math.sin(4 * math.pi * frequency * t)
         samples.append((0.78 * fundamental + 0.22 * harmonic) * pulse)
     return fade_edges(samples)
 
 
-def make_bells(sparkle, bass_pitch):
+def make_bells(sparkle, bass_pitch, flower_steps=None):
     """A small pentatonic pattern stays related to the bass pitch."""
     count = SAMPLE_RATE * SECONDS
     samples = [0.0] * count
     root = PITCHES[round(bass_pitch * (len(PITCHES) - 1))] * 4
-    notes = (0, 7, 12, 4, 9, 7, 4, 12)
-    number = 2 + round(sparkle * 6)
-    for note in range(number):
-        start = round(note * count / number)
-        frequency = root * 2 ** (notes[note] / 12)
+    for start, semitone in bell_pattern(sparkle, flower_steps):
+        frequency = root * 2 ** (semitone / 12)
         for j in range(round(0.70 * SAMPLE_RATE)):
             t = j / SAMPLE_RATE
             envelope = min(1, t / 0.006) * math.exp(-t * (7 - 2 * sparkle))
@@ -184,11 +214,18 @@ def make_bells(sparkle, bass_pitch):
     return fade_edges([max(-1, min(1, value)) for value in samples])
 
 
-def render_layers(mix):
+def render_layers(mix, previous=None, previous_character=None):
     """Generate all ingredients once; even muted layers stay ready to join the loop."""
     validate(mix)
+    count = SAMPLE_RATE * SECONDS
+    if (previous is not None and previous_character is not None
+            and tuple(mix.character) == tuple(previous_character)
+            and len(previous) == 3 and all(len(layer) == count for layer in previous)):
+        # A flower click edits only the melody; the rain and bass keep their loops.
+        return [previous[0], previous[1],
+                make_bells(mix.character[2], mix.character[1], mix.flower_steps)]
     return [make_rain(mix.character[0]), make_bass(mix.character[1]),
-            make_bells(mix.character[2], mix.character[1])]
+            make_bells(mix.character[2], mix.character[1], mix.flower_steps)]
 
 
 def mix_layers(layers, mix):

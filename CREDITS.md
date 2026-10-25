@@ -13,10 +13,8 @@
 - `week07/ball.py` and `ball_pygame.py`: explicit object state, separated model
   and view, and a readable event loop.
 
-The sound recipes, synthesis implementation, interface and tests here were written
-for this project with AI assistance. No course image, music file, font file or
-student artwork is redistributed. The mathematical sine/WAV concepts are adapted
-into the new three-layer interaction; the course tutorials are not the submission.
+Synthesis implementation, interface and tests here were written
+for this project with AI assistance.
 
 ## Software and documentation
 
@@ -74,4 +72,4 @@ for the current division of work and pending student/user-trial reflection.
 The garden artwork is drawn from Python/Pygame geometry created for this project
 with Codex assistance. No external garden images, sprite packs or textures are
 used. Chinese garden names use the existing Windows Microsoft YaHei font when
-available; font files are not redistributed.
+available.
