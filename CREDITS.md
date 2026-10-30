@@ -41,7 +41,8 @@ for this project with AI assistance.
 ## Media and AI
 
 All audio is synthesized by `sound.py`; there are no borrowed field recordings
-or third-party music tracks. Interface graphics are drawn in code. The screenshot
+or third-party music tracks. Interface controls and live effects are drawn in code,
+with locally included artwork described below. The screenshot
 comes from the app's own renderer. `docs/rainy-window.wav` is an intentional sample
 made by the original synthesis code. `docs/rainy-window-v2.wav` and
 `docs/rain-only-v2.wav` use the rejected impact-based revision. The current
@@ -63,13 +64,42 @@ filter coefficients, not an encoded waveform. `docs/rain-only-v4.wav` and
 audio versions remain development references. NumPy was used only in the
 existing analysis environment; it is not a new app dependency.
 
+The 30 October loop repair keeps these fitted Rain filters and uses the previous
+lap to settle their state. Bass closes whole oscillator cycles in four seconds;
+Rain and Bass no longer use the bell phrase's edge fade. The new
+`docs/rain-bass-seamless.wav` is a 16-second synthetic demonstration of this
+repair. No recording or new sound library was introduced; older WAVs remain
+historical examples. Codex assisted with the repair and regression checks.
+
 Codex assisted with ideas, code, documentation and verification. See `PROCESS.md`
 for the current division of work and pending student/user-trial reflection.
 
 
-## Procedural garden
+## Moonlit glass garden / 30 October 2026
 
-The garden artwork is drawn from Python/Pygame geometry created for this project
-with Codex assistance. No external garden images, sprite packs or textures are
-used. Chinese garden names use the existing Windows Microsoft YaHei font when
-available.
+The student selected the glass ecosystem music-box concept, combined it with the
+layered landscape of the botanical-notebook concept, then asked for softer
+natural textures. Codex used the built-in OpenAI ImageGen tool to create four
+original production PNGs in `assets/glass/`: a night landscape, two glass
+flower states, eight specimen miniatures and four botanical scenery accents.
+The [asset notes](assets/glass/README.md) retain the generation prompts and
+describe how the image sheets are used.
+
+These are AI-generated artwork, not photographs, purchased sprite packs or
+manually painted student illustrations. The app includes the files and needs
+no image service at runtime. Codex wrote the asset integration and dark UI.
+Pygame draws text, controls, rain, rhythm lights, roots and feedback at the
+current display density. The original procedural geometry remains as a
+fallback when an image cannot be read.
+
+Screenshots and silent demos are captured from the working app, not from the
+concept generator. Chinese garden names use the existing Windows Microsoft
+YaHei font when available.
+
+The later edge-foliage revision adds a fifth original PNG atlas, `foliage.png`,
+generated with the built-in ImageGen tool from the student's current screenshot
+and approved concept as visual references. Its four plants are natural ivy,
+hanging leaves, a fern/moss corner and a broad-leaf branch. These are shaded
+2D sprites that suggest depth, not real-time 3D models. Pygame fits the plants,
+casts soft shadows and caches the composition at each window size. The exact
+prompt and atlas boundaries are recorded in the asset notes.

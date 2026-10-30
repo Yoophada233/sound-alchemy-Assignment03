@@ -1,18 +1,220 @@
-# Verification / 22–25 October 2026
+# Verification
 
 ## Environment
 
 - Windows desktop; display driver reported by Pygame: `windows`.
-- Desktop size reported: 1920 x 1080; current notebook canvas: 1280 x 960.
+- Desktop size reported: 1920 x 1080; logical notebook layout: 1280 x 960.
+  The current content canvas follows the window's native viewport pixels.
   The earlier garden canvas was 1280 x 900; the listening lab was 1180 x 860.
 - Project-local CPython 3.12.14; Pygame 2.6.1.
 - Audio format accepted by the local mixer: 22,050 Hz, signed 16-bit, mono.
-- Source and generated files remained in the new `sound-alchemy/` folder.
-  Dependencies/cache and Python were placed in `.uv-cache/` and `.python/`.
+- Earlier revisions used the `sound-alchemy/` source folder; the current
+  29 October revisions use the `Assignment-3-sound-alchemy/` Git checkout.
+  Dependencies/cache and Python are local to `.uv-cache/` and `.python/`.
   Individual historical sections describe their own modification boundaries;
   this record is not evidence of a Canvas submission or a live website.
 
 ## Executed checks
+
+### Dimensional edge foliage / 30 October 2026
+
+- Added four original ImageGen plant sprites in `assets/glass/foliage.png`:
+  ivy, hanging leaves, fern/moss and a broad-leaf branch. The supplied current
+  screenshot and earlier concept were style/layout references. The delivered
+  atlas is 1254 x 1254 RGBA; the original file is preserved. Its left-row split
+  uses the actual transparent gap at 54%, avoiding a cropped vine or stray leaf.
+- `foliage.py` fits the shaded plants at native destination density and adds soft
+  shadows. `backdrop.py` anchors the mist colour field to the page so wider window
+  margins blend with it. Decorations sit behind text and controls; hit areas and
+  the four playable flowers retain their coordinates. The plants are static 2D
+  artwork suggesting depth, not real-time 3D geometry or newly interactive objects.
+- The page and surrounding plants are built on initialization/resize and cached.
+  **92 related checks passed**: artwork, resolution, UI and exploration tests.
+  The asset-failure check was expanded and rerun with its four-test module; missing
+  foliage leaves a working backdrop and surrounding window instead of preventing
+  startup. Resolution tests exercise real handlers at 2560 x 1440 and 3840 x 2160.
+- Actual SDL-rendered screenshots were inspected at 1280 x 960, 1920 x 1080 and
+  3840 x 2160; a 2560 x 1440 capture was also produced. At 2K/4K the content canvas
+  is 1920 x 1440 / 2880 x 2160 respectively, with text rendered at that density.
+  Warm frame medians over 12 draws were 11.49 / 16.00 / 19.10 / 35.08 ms for those
+  four window sizes. A guard confirmed no background/border rebuild during these
+  draws. These are local silent SDL checks, not monitor testing on another PC.
+- Updated `docs/screenshot.png`; added `docs/foliage-wide.png`. Both are actual
+  application renders. Full-resolution review images and timing results are in
+  ignored `out/foliage-review/`. Earlier interaction GIFs retain the former edges.
+- Recovery copy and hashes: `.backups/before-foliage-border-20261030-183409/`.
+  The sound synthesis, personal PROCESS, launcher and dependencies were not edited.
+  No Git commit/push or real-person usability trial is claimed for this revision.
+
+### Continuous Rain and Bass loops / 30 October 2026
+
+- The student reported an audible interruption every four seconds. Both source
+  buffers applied an 8 ms fade at each end, leaving a repeated dip. Several Bass
+  pitches also ended partway through an oscillator cycle. Live playback already
+  used SDL's repeating buffers; no timer-driven restart was needed or changed.
+- Rain now warms the existing reference-profile filters with a discarded lap of
+  the same seeded noise, preserving their state through the join. Its circular
+  density envelopes and reference coefficients are unchanged. Bass closes whole
+  cycles in four seconds without the edge fade. The maximum tuning difference is
+  0.972 cents; A2/A3 are unchanged. The one-second pulse and Bells synthesis remain.
+- At the reported settings (both levels 100%, Drops 92, Bass A3), an 8 ms window
+  centred on the seam measured **-11.03 to -1.06 dB for Rain** and
+  **-12.11 to -1.92 dB for Bass**, relative to the median ordinary window.
+  The remaining variation reflects the rain texture and Bass breathing envelope.
+  Excluding the first/last 50 ms, Rain's relative RMS sample difference from the
+  backup was below 0.0005% at all three tested densities. This supports preserving
+  the established timbre; it is not a listening acceptance claim.
+- **169 regression checks passed** in the project-local Python environment.
+  Five new signal/export tests cover seam energy at three Rain densities, boundary
+  jumps/corners, all seven Bass phases and pitches, and the actual 8-second WAV.
+  The two main seam checks were also run against the backup and correctly failed.
+  Historical Rain/Bass PCM digests were replaced with the relevant independent
+  flower-pattern check; twelve unchanged Bells PCM digests still pass.
+- A new UI check verifies no restart at simulated loop boundaries. A separate
+  **12.2-second real-time run with silent SDL devices** kept both original Sound
+  buffers and the playback clock at 4.2, 8.2 and 12.2 seconds. No extra Play call
+  occurred; Stop ended playback. This checks actual loop scheduling, not speakers.
+- `docs/rain-bass-seamless.wav` contains four exact PCM repeats (16 seconds), with
+  both levels 100%, Drops 92, A3, Master 70%, Bells off. Before/after isolated Rain,
+  Bass and combined files plus numerical results are in ignored
+  `out/seamless-loop-checks/1793355668675998100/`. The comparison uses equal gains.
+  Every WAV was reopened and its duration and repeated bytes verified.
+- New sidecar recipes identify `loop_model: periodic-rain-bass-v1`; `rain_model`
+  remains `minecraft-reference-v4`. Previous demo WAVs are historical examples.
+  Backup: `.backups/before-seamless-loops-20261030-181055/`, with file hashes.
+  No UI, gameplay, launcher, dependency or personal PROCESS change was required.
+  No physical-output recording or human listening trial was performed for this fix.
+
+### Moonlit glass artwork / 30 October 2026
+
+- Implemented the student's selected glass music-box direction with the deeper
+  lake/mountain composition and softened natural textures. The live application
+  uses four included PNGs plus separate native-resolution controls and effects;
+  it does not use a flattened concept screenshot as its interface.
+- Open/rest glass flowers retain their four separate beat positions, generous
+  hit areas and synchronized lights. Rain, extra fern growth, root pulses,
+  fireflies and scene accents still respond to the sound controls. Eight
+  miniature specimens distinguish dim unobserved entries from lit discoveries.
+- The dark palette covers the workbench, field notes, visitor error/success
+  panels, collection, naming dialog and export menu. A full-width painting now
+  fills the wide stage; the old repeated-column edge extension is not used for
+  painted scenery. Fallback procedural rendering remains available if a PNG
+  is absent or damaged.
+- **163 regression checks passed**, including four asset checks for true alpha,
+  usable sprite regions, missing/damaged files, procedural fallback and the
+  wide-scene edge regression. Log: `out/art-review/tests-final.log`. The printed
+  read-only-export and missing-viewer errors are intentional test cases.
+  After the final static-console cache change, **87 UI, resolution and
+  exploration checks passed again** (`out/art-review/ui-cache-final.log`).
+- Inspected actual application captures at 1280 x 960, 2560 x 1440 and
+  3840 x 2160. Their content canvases are respectively 1280 x 960,
+  1920 x 1440 and 2880 x 2160. Text and controls stay native; the deliberately
+  soft landscape uses a 1942 x 809 painting. Larger desktops retain the
+  existing centered 4:3 composition.
+- Cached the three static instrument cases in the native background. Warm
+  preview samples after this change (20 frames each, silent SDL driver) had
+  median times of approximately 11 ms, 18 ms and 33 ms at those window sizes.
+  The earlier 4K pass took about 46 ms. These are local preview timings, not
+  a universal FPS guarantee; live lights, recipe changes and larger windows
+  can cost more. Records: `out/art-review/render-timing-final.json`;
+  captures and resolution records: `review.json` and `native-*.png` there.
+- A hidden **native Windows** window accepted posted flower, Play and held
+  listening-focus keys, resized to 1600 x 900, and stopped on focus loss.
+  This check used a silent audio driver; it is not a new speaker audition or
+  a physical 4K-monitor acceptance test. Record: `out/art-review/native-smoke.json`.
+- SHA-256 comparisons against the pre-change backup confirmed that `sound.py`,
+  `garden.py`, `fieldguide.py`, `raster.py`, `PROCESS.md` and `start.cmd` were
+  unchanged by this artwork pass. Existing uncommitted work was retained.
+  The backup is `.backups/before-glass-garden-20261030-010149/`.
+- Runtime PNGs and the short silent GIF demonstrations were regenerated from
+  the app. They are scripted visual evidence, not a real user trial. Artwork
+  credits and generation prompts are in `assets/glass/README.md` and `CREDITS.md`.
+  No dependency, global setting, Git commit or remote was changed in this pass.
+
+### Listening instrument and progressive field notes / 29 October 2026
+
+- The single gold Play/Stop control sits above the flowers and stays accessible
+  when a letter is open. A dismissible introduction responds to actual playback
+  and flower edits. Larger seed-number buttons, RING/REST labels, hover feedback
+  and keys 1-4 make the four-beat instrument explicit. The discovery notice now
+  sits in the upper frame instead of covering the flowers.
+- All eight specimens have a persistent listening clue, an optional contextual
+  nudge and an explicitly requested numeric recipe. The clue stays selected
+  during edits. After collecting, it offers a composing experiment. Visitors
+  also start with descriptive clues and offer recipe numbers on request;
+  rejected sharing retains its specific recovery feedback.
+- Holding a Rain/Bass/Bells button or Q/W/E isolates that running layer through
+  mixer gain only. Release restores the latest full mix without replacing its
+  buffers or resetting its clock. Keyboard focus permits simultaneous slider
+  editing. Mouse release outside the button, pointer departure, focus loss,
+  Stop, Reset, naming and muting the focused ingredient are covered. The
+  listening focus never changes the recipe, exported samples or discovery
+  conditions. Sound-driven root/bell lights respect the focused layer.
+- **159 regression checks passed**: the previous 137 plus 22 exploration checks.
+  After the last letter-layout adjustment, **87 UI, resolution and exploration
+  checks passed again**. Logs: `out/exploration-checks/regression.log` and
+  `out/exploration-checks/final-ui-tests.log`. The printed read-only-folder and
+  missing-folder-viewer errors are intentional test cases.
+- Checks cover all eight reachable nudge routes, muted ingredients and resting
+  flowers, help-text fit, held-key releases, newly generated audio while a focus
+  key is held, naming input, and 2K/4K hit positions for the new controls.
+  Letter paper blocks covered controls; hidden listening/Keep controls cannot
+  receive clicks through it.
+- A hidden native Windows window accepted posted number-key and focus-key
+  events, resized to 1600 x 900 (1200 x 900 content), and stopped all mixer
+  channels on focus loss. The real local mixer accepted 22,050 Hz / signed
+  16-bit / mono. The probe used a gain that quantizes to zero, so it was silent;
+  it verifies native APIs, not speaker quality or a person's understanding.
+  Details: `out/exploration-checks/native-probe.json`.
+- `start.cmd --screenshot out/exploration-checks/launcher-final.png` completed
+  successfully through the documented launcher. No dependency was added.
+- Current screenshots and silent GIF demonstrations were refreshed from the app
+  renderer. The new `docs/listening-tour.gif`, `docs/listening-guide.png` and
+  `docs/listening-focus.png` illustrate the changed experience. These use
+  prepared inputs, not a user trial. Native-size 2560 x 1440 and 3840 x 2160
+  offscreen frames are retained in `out/exploration-checks/`.
+- Recovery snapshot, including the preceding uncommitted high-resolution work:
+  `.backups/before-listening-exploration-20261029-011725/`. Its 15 originals were
+  SHA-256 checked before editing. Only this checkout was changed. `PROCESS.md`,
+  the synthesis implementation and the discovery rules were preserved. No Git
+  staging, commit or push was performed. Physical 2K/4K displays, listening
+  preference and a separate-person trial remain unverified for this revision.
+
+### Native-resolution rendering and Windows DPI
+
+- The earlier renderer enlarged a 1280 x 960 UI bitmap and a 748 x 310 garden.
+  The new renderer uses those dimensions as logical coordinates, rasterizes
+  typography and geometry at the destination density, and blits the finished
+  frame at 1:1 pixels. The continuous backdrop colour field remains interpolated;
+  its botanical line art is drawn at the current resolution.
+- Rendering and input checks include 2560 x 1440 and 3840 x 2160 windows. Their
+  content frames are respectively 1920 x 1440 and 2880 x 2160. Tests check native
+  glyph pixels, garden working resolution, flower/slider hit positions,
+  letterbox/popup interception, IME placement after resize, crisp thumbnails,
+  saved-recipe preservation and return to a smaller window.
+- Rendered before/after crops in ignored `out/resolution-checks/` were inspected
+  at their original pixel sizes. They cover the title, small labels and garden.
+  Only this `Assignment-3-sound-alchemy` checkout was changed; `PROCESS.md`,
+  audio synthesis and the other working copy were left intact.
+- A native Windows check confirmed `permonitorv2` awareness on the running app
+  window at 96 DPI. Maximizing produced a 1920 x 1017 client surface and a
+  1356 x 1017 native content frame. Actual 2K/4K hardware and moving between
+  monitors at different Windows scale factors were not physically tested.
+- Resolution-specific text/specimen images and two-entry garden/stage buffer
+  caches avoid repeatedly allocating large surfaces. A regression exposed zero
+  alpha copied from an alpha-disabled RGBA sky; a true RGB sky fixes it. The
+  checks verify both an opaque sky and clean buffers without earlier glows.
+- Recovery snapshot: `.backups/before-native-resolution-20261029-000101/`.
+- Final regression: **137 tests passed** (54 UI, 31 garden, 12 sound, 10 rhythm,
+  9 melody, 10 flower-view and 11 native-resolution checks). Output is retained
+  under ignored `out/resolution-checks/regression-final.log`.
+- Fifteen warm software-rendered frames averaged 21.55 ms at 2560 x 1440 and
+  33.66 ms at 3840 x 2160 on this computer. These are local rendering measurements,
+  not a guarantee for other monitors or computers. No render-resolution cap or
+  quality reduction was applied to obtain them.
+- `start.cmd --screenshot out/resolution-checks/launcher-final.png` succeeded.
+  This revision does not add packages, modify global DPI settings, commit or
+  push to GitHub, or count as a separate-person usability trial.
 
 ### Four flowers, one melody / 25 October 2026
 

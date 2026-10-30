@@ -13,6 +13,7 @@ SAMPLE_RATE = 22050
 SECONDS = 4
 SEED = 7
 RAIN_MODEL = "minecraft-reference-v4"
+LOOP_MODEL = "periodic-rain-bass-v1"
 # Fitted to the band powers of the user's reference BV1Pe411x7JY (60–90 s).
 # These are filter coefficients, not samples copied from the recording.
 RAIN_LOW_ALPHA = 0.1871169673
@@ -70,7 +71,7 @@ class Mix:
                 "enabled": self.enabled.copy(), "master": self.master,
                 "flower_steps": list(self.flower_steps),
                 "sample_rate": SAMPLE_RATE, "loop_seconds": SECONDS, "seed": SEED,
-                "rain_model": RAIN_MODEL}
+                "rain_model": RAIN_MODEL, "loop_model": LOOP_MODEL}
 
 
 def validate(mix):
@@ -87,7 +88,7 @@ def validate(mix):
 
 
 def fade_edges(samples):
-    """An 8 ms fade at each loop edge reduces clicks when playback repeats."""
+    """Soften bell phrase edges; continuous Rain and Bass must not fade each lap."""
     fade = round(0.008 * SAMPLE_RATE)
     for i in range(fade):
         gain = i / fade
@@ -127,15 +128,19 @@ def make_rain(density):
     count = SAMPLE_RATE * SECONDS
     rng = random.Random(SEED)
     # Match the reference's broad spectral balance before adding strength changes.
+    # Run the same noise twice, retaining filter state across the join. Discard
+    # the first lap so the returned loop starts with the previous lap's history.
+    white = [rng.gauss(0, 1) for _ in range(count)]
     samples = []
     low = upper = 0.0
-    for _ in range(count):
-        white = rng.gauss(0, 1)
-        low += RAIN_LOW_ALPHA * (white - low)
+    for value in white * 2:
+        low += RAIN_LOW_ALPHA * (value - low)
         upper += RAIN_UPPER_ALPHA * (low - upper)
         samples.append(upper)
+    samples = samples[count:]
     for coefficients in RAIN_FILTERS:
-        samples = filter_rain(samples, coefficients)
+        # Four seconds is well beyond these filters' settling time.
+        samples = filter_rain(samples * 2, coefficients)[count:]
 
     motion = random.Random(SEED + 11)
     knots = [motion.uniform(0.82, 1.18) for _ in range(16)]
@@ -161,7 +166,7 @@ def make_rain(density):
     samples = [value * gain for value, gain in zip(samples, strength)]
     rms = math.sqrt(sum(value * value for value in samples) / count)
     gain = (0.045 + density * 0.03) / rms
-    return fade_edges([value * gain for value in samples])
+    return [value * gain for value in samples]
 
 
 def bass_pulse(seconds):
@@ -188,6 +193,9 @@ def bell_pattern(sparkle, flower_steps=None):
 
 def make_bass(pitch):
     frequency = PITCHES[round(pitch * (len(PITCHES) - 1))]
+    # Close both oscillators at the four-second boundary. The nearest whole
+    # cycle changes these notes by less than one cent; A2 and A3 stay exact.
+    frequency = round(frequency * SECONDS) / SECONDS
     samples = []
     for i in range(SAMPLE_RATE * SECONDS):
         t = i / SAMPLE_RATE
@@ -195,7 +203,7 @@ def make_bass(pitch):
         fundamental = math.sin(2 * math.pi * frequency * t)
         harmonic = math.sin(4 * math.pi * frequency * t)
         samples.append((0.78 * fundamental + 0.22 * harmonic) * pulse)
-    return fade_edges(samples)
+    return samples
 
 
 def make_bells(sparkle, bass_pitch, flower_steps=None):

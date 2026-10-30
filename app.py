@@ -14,26 +14,37 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
+os.environ.setdefault("SDL_WINDOWS_DPI_AWARENESS", "permonitorv2")
 import pygame
 
 from sound import (HEADROOM, Mix, NOTE_NAMES, PRESETS, SAMPLE_RATE, SECONDS,
                    mix_layers, pcm_bytes, render_layers, save_mix)
 from garden import Garden, SCENES, WISHES, effective_levels, scene_for
+from fieldguide import FIELD_NOTES, listening_observation, next_nudge
 from garden_view import draw_discovery_effect, draw_garden, flower_targets
-from backdrop import create_background
+from backdrop import create_background, create_surround
 from specimens import draw_collection_flight, draw_specimen
+from artwork import material, clear_caches as clear_art_caches
+from raster import draw, make_surface, point as pixel_point, rect as pixel_rect, viewport, initial_window_size
 
 HERE = Path(__file__).resolve().parent
 SIZE = (1280, 960)
 GARDEN_RECT = pygame.Rect(28, 88, 1224, 448)
-VISITOR_RECT = pygame.Rect(920, 106, 310, 326)
+VISITOR_RECT = pygame.Rect(920, 194, 310, 326)
 TOOLS_RECT = pygame.Rect(948, 776, 304, 104)
-PAPER = "#F2F7F0"
-INK = "#213F35"
-MUTED = "#60786A"
-LINE = "#C0D2C3"
-COLORS = ("#397D7B", "#B35C40", "#87669A")
-TINTS = ("#EDF6EE", "#F0F3E9", "#EFF0F6")
+GUIDE_RECT = pygame.Rect(50, 176, 730, 144)
+PLAY_RECT = pygame.Rect(974, 108, 254, 52)
+DISCOVERY_RECT = pygame.Rect(447, 106, 507, 58)
+FOCUS_KEYS = (pygame.K_q, pygame.K_w, pygame.K_e)
+FLOWER_KEYS = (pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4)
+PAPER = "#0D1C24"
+INK = "#EEE9D8"
+MUTED = "#A0B4B5"
+LINE = "#465B5B"
+GOLD = "#C9AD72"
+DARK_INK = "#202B2B"
+COLORS = ("#86D8CF", "#EAA986", "#C4ACE0")
+TINTS = ("#142C32", "#202D31", "#1D2A35")
 NAMES = ("Rain", "Bass", "Bells")
 CHARACTER_NAMES = ("Drops", "Pitch", "Sparkle")
 DESCRIPTIONS = ("A steady, finely textured rain.", "A warm pulse to hold it together.",
@@ -49,7 +60,12 @@ class AudioPlayer:
         self.bank = 0
         self.bell_channel = 2
         self.sounds = [None] * 6
+        self.focus = None
         self.connect()
+
+    def gain(self, mix, index):
+        return (mix.levels[index] * mix.master
+                if mix.enabled[index] and self.focus in (None, index) else 0)
 
     def connect(self):
         try:
@@ -72,7 +88,7 @@ class AudioPlayer:
                 pygame.mixer.Channel(channel).fadeout(60)
             self.bank = 1 - self.bank
             for index, sound in enumerate(sounds):
-                gain = mix.levels[index] * mix.master if mix.enabled[index] else 0
+                gain = self.gain(mix, index)
                 sound.set_volume(gain)
                 channel = self.bank * 3 + index
                 self.sounds[channel] = sound
@@ -92,7 +108,7 @@ class AudioPlayer:
             sample = round((time.monotonic() - origin) * SAMPLE_RATE) % (SAMPLE_RATE * SECONDS)
             offset = sample * 2
             sound = pygame.mixer.Sound(buffer=data[offset:] + data[:offset])
-            sound.set_volume(mix.levels[2] * mix.master if mix.enabled[2] else 0)
+            sound.set_volume(self.gain(mix, 2))
             channel = 5 if self.bell_channel == 2 else 2
             pygame.mixer.Channel(self.bell_channel).fadeout(30)
             self.sounds[channel] = sound
@@ -111,7 +127,7 @@ class AudioPlayer:
             for channel, sound in enumerate(self.sounds):
                 if sound is not None:
                     index = channel % 3
-                    gain = mix.levels[index] * mix.master if mix.enabled[index] else 0
+                    gain = self.gain(mix, index)
                     sound.set_volume(gain)
             return True
         except pygame.error as error:
@@ -121,6 +137,7 @@ class AudioPlayer:
             return False
 
     def stop(self):
+        self.focus = None
         if pygame.mixer.get_init():
             pygame.mixer.stop()
 
@@ -141,12 +158,18 @@ class Lab:
     def __init__(self, output=HERE / "out" / "mixes"):
         pygame.display.init()
         pygame.font.init()
-        self.screen = pygame.display.set_mode(SIZE, pygame.RESIZABLE)
-        pygame.display.set_caption("Sound garden | a living field notebook")
-        self.canvas = pygame.Surface(SIZE)
+        self.screen = pygame.display.set_mode(initial_window_size(SIZE), pygame.RESIZABLE)
+        pygame.display.set_caption("Sound garden | a moonlit music box")
+        self.render_scale = 1.0
+        self.canvas = make_surface(SIZE)
         self.background = create_background(SIZE)
+        self.surround = None
+        self.surround_area = None
+        self.console_ready = False
         self.panel_shadows = {}
         self.fonts = {}
+        self.text_images = {}
+        self.specimen_images = {}
         self.audio = AudioPlayer()
         self.pool = ThreadPoolExecutor(max_workers=1)
         self.future = None
@@ -192,6 +215,14 @@ class Lab:
         self.name_selected = False
         self.name_error = ""
         self.last_saved = None
+        self.has_listened = False
+        self.flower_edits = 0
+        self.guide_scene = None
+        self.guide_help = 0
+        self.wish_help = False
+        self.focus_source = None
+        self.lesson_hidden = False
+        self.cursor_kind = None
         self.message = "Click the four numbered flowers to write a melody. Press Play to hear your garden."
         if not self.audio.available:
             self.message = "No audio device yet. You can still mix and save; Play retries the connection."
@@ -210,6 +241,8 @@ class Lab:
         self.revision += 1
         self.last_edit = time.monotonic()
         self.message = message
+        if self.audio.focus is not None and not effective_levels(self.mix)[self.audio.focus]:
+            self.end_focus()
         if self.playing and not self.mix.audible():
             self.stop(self.silent_hint())
         elif self.playing and not self.audio.set_levels(self.mix):
@@ -261,7 +294,41 @@ class Lab:
         self.playing = False
         self.audio_started = False
         self.audio.stop()
+        self.focus_source = None
         self.message = message
+
+    def begin_focus(self, index, source="mouse"):
+        """Temporarily isolate a running layer; recipes and loop time stay intact."""
+        if not self.playing or not self.audio_started:
+            self.message = "Press Play first, then hold Rain, Bass or Bells to hear one layer."
+            return
+        if not self.character_available(index):
+            self.message = f"{NAMES[index]} is silent. Switch it on and raise its LEVEL first."
+            return
+        if index == 2 and not any(self.mix.flower_steps):
+            self.message = "The Bells are resting. Wake a numbered flower first."
+            return
+        if self.mix.master <= 0:
+            self.message = "Raise MASTER to hear your garden."
+            return
+        self.audio.focus = index
+        self.focus_source = source
+        if not self.audio.set_levels(self.mix):
+            self.stop("Audio was interrupted. Press Play to retry.")
+
+    def end_focus(self):
+        if self.audio.focus is None:
+            return
+        self.audio.focus = None
+        self.focus_source = None
+        if self.playing and not self.audio.set_levels(self.mix):
+            self.stop("Audio was interrupted. Press Play to retry.")
+
+    def open_guide(self, index):
+        self.guide_scene = SCENES[index]["id"]
+        self.guide_help = 0
+        self.collection_tab = "guide"
+        self.message = FIELD_NOTES[self.guide_scene]["clue"]
 
     def toggle_play(self):
         if self.playing:
@@ -289,11 +356,13 @@ class Lab:
             self.rhythm_character = self.layer_character
             self.rhythm_steps = self.layer_steps
             self.audio_started = True
+            self.has_listened = True
 
     def reset(self):
         self.stop()
         self.mix = Mix()
         self.preset_name = "Rainy window"
+        self.guide_help = 0
         self.changed("Reset sounds and four-flower melody. This visit's field notes are still here.", discover=False)
 
     def choose_preset(self, name):
@@ -362,11 +431,13 @@ class Lab:
                                            self.layers, self.layer_character)
 
     def point(self, pos):
-        width, height = self.screen.get_size()
-        scale = min(width / SIZE[0], height / SIZE[1])
-        left = (width - SIZE[0] * scale) / 2
-        top = (height - SIZE[1] * scale) / 2
-        return ((pos[0] - left) / scale, (pos[1] - top) / scale)
+        area, scale = viewport(self.screen.get_size(), SIZE)
+        return ((pos[0] - area.x) / scale, (pos[1] - area.y) / scale)
+
+    def name_input_rect(self):
+        area, scale = viewport(self.screen.get_size(), SIZE)
+        return pygame.Rect(area.x + round(361 * scale), area.y + round(401 * scale),
+                           round(558 * scale), round(48 * scale))
 
     def slider_value(self, key):
         kind, index = key
@@ -393,6 +464,7 @@ class Lab:
                             else "Raise Bells LEVEL above 0% to edit and hear the four flowers.")
             return
         self.mix.flower_steps[index] = not self.mix.flower_steps[index]
+        self.flower_edits += 1
         self.preset_name = None
         action = "will ring" if self.mix.flower_steps[index] else "will rest"
         message = f"Flower {index + 1} {action}. {sum(self.mix.flower_steps)} / 4 notes in your loop."
@@ -431,6 +503,7 @@ class Lab:
         self.changed(message, discover=kind != "master")
 
     def begin_keep(self):
+        self.end_focus()
         if not any(effective_levels(self.mix)):
             self.message = "Add a little Rain, Bass or Bells before keeping a garden."
             return
@@ -442,11 +515,7 @@ class Lab:
         self.name_error = ""
         self.dragging = None
         pygame.key.start_text_input()
-        width, height = self.screen.get_size()
-        scale = min(width / SIZE[0], height / SIZE[1])
-        pygame.key.set_text_input_rect(pygame.Rect(
-            (width - SIZE[0] * scale) / 2 + 361 * scale,
-            (height - SIZE[1] * scale) / 2 + 401 * scale, 558 * scale, 48 * scale))
+        pygame.key.set_text_input_rect(self.name_input_rect())
 
     def finish_keep(self):
         previous_discoveries = self.garden.discovered.copy()
@@ -481,8 +550,9 @@ class Lab:
             return
         if self.active_wish != wish["id"]:
             self.wish_error_at = None
+            self.wish_help = False
             self.active_wish = wish["id"]
-            self.message = "A small invitation, at your own pace. " + wish["hint"]
+            self.message = "A small invitation, at your own pace. " + FIELD_NOTES[wish["scene"]]["clue"]
         elif self.garden.complete(wish["id"], self.mix):
             self.wish_error_at = None
             self.message = f"A visitor left a thank-you stamp for {wish['title']}. Keep your garden if you like it!"
@@ -525,6 +595,18 @@ class Lab:
     def event(self, event):
         if event.type == pygame.QUIT:
             self.running = False
+            self.end_focus()
+        elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+            self.dragging = None
+            if self.focus_source == "mouse":
+                self.end_focus()
+        elif event.type == pygame.KEYUP:
+            if (self.focus_source == "keyboard" and self.audio.focus is not None
+                    and event.key == FOCUS_KEYS[self.audio.focus]):
+                self.end_focus()
+        elif event.type == pygame.WINDOWLEAVE:
+            if self.focus_source == "mouse":
+                self.end_focus()
         elif event.type == pygame.WINDOWFOCUSLOST:
             self.dragging = None
             self.pointer = (-1, -1)
@@ -533,7 +615,13 @@ class Lab:
         elif self.naming:
             self.name_event(event)
         elif event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_SPACE:
+            if getattr(event, "repeat", False):
+                return
+            if event.key in FLOWER_KEYS:
+                self.toggle_flower(FLOWER_KEYS.index(event.key))
+            elif event.key in FOCUS_KEYS:
+                self.begin_focus(FOCUS_KEYS.index(event.key), "keyboard")
+            elif event.key == pygame.K_SPACE:
                 self.toggle_play()
             elif event.key == pygame.K_ESCAPE:
                 self.letter_open = False
@@ -564,6 +652,9 @@ class Lab:
                     return
             # Popovers are drawn last; their buttons receive clicks first.
             for key, rect in reversed(list(self.buttons.items())):
+                if (self.letter_open and VISITOR_RECT.collidepoint(point)
+                        and key[0] not in ("letter_close", "wish", "next_wish", "wish_help")):
+                    continue
                 if rect.collidepoint(point):
                     kind, value = key
                     if kind == "preset":
@@ -585,9 +676,19 @@ class Lab:
                     elif kind == "tab":
                         self.collection_tab = value
                     elif kind == "guide":
-                        self.message = SCENES[value]["hint"]
+                        self.open_guide(value)
+                    elif kind in ("guide_help", "guide_recipe"):
+                        self.guide_help = value
+                    elif kind == "guide_close":
+                        self.guide_scene = None
+                        self.lesson_hidden = True
+                    elif kind == "lesson_close":
+                        self.lesson_hidden = True
+                    elif kind == "focus":
+                        self.begin_focus(value)
                     elif kind == "discovery_view":
-                        self.collection_tab = "guide"
+                        self.open_guide(next(index for index, scene in enumerate(SCENES)
+                                             if scene["id"] == self.discovery_current))
                     elif kind == "discovery_close":
                         self.next_discovery()
                     elif kind == "restore":
@@ -601,20 +702,26 @@ class Lab:
                         self.wish_index = (self.wish_index + 1) % len(WISHES)
                         self.active_wish = None
                         self.wish_error_at = None
+                        self.wish_help = False
                         self.message = "Another visitor note. You can explore freely or try its invitation."
                     elif kind == "letter":
+                        self.end_focus()
                         self.letter_open = not self.letter_open
                         self.tools_open = False
                     elif kind == "letter_close":
                         self.letter_open = False
+                    elif kind == "wish_help":
+                        self.wish_help = not self.wish_help
                     elif kind == "tools":
                         self.tools_open = not self.tools_open
                         self.letter_open = False
                     return
             # Letter paper and discovery labels cover anything behind them.
+            if self.guide_scene is not None and GUIDE_RECT.collidepoint(point):
+                return
             if self.letter_open and VISITOR_RECT.collidepoint(point):
                 return
-            if self.discovery_current is not None and pygame.Rect(48, 421, 358, 88).collidepoint(point):
+            if self.discovery_current is not None and DISCOVERY_RECT.collidepoint(point):
                 return
             for index, target in enumerate(flower_targets(GARDEN_RECT, self.mix)):
                 if target.collidepoint(point):
@@ -622,10 +729,12 @@ class Lab:
                     return
         elif event.type == pygame.MOUSEMOTION:
             self.pointer = self.point(event.pos)
+            if self.focus_source == "mouse" and self.audio.focus is not None:
+                held = self.buttons.get(("focus", self.audio.focus))
+                if held is None or not held.collidepoint(self.pointer):
+                    self.end_focus()
             if self.dragging is not None:
                 self.move_slider(self.dragging, self.pointer)
-        elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
-            self.dragging = None
 
     def font(self, size, serif=False, bold=False):
         key = (size, serif, bold)
@@ -639,66 +748,90 @@ class Lab:
         return self.fonts[key]
 
     def text(self, text, x, y, size=16, color=INK, serif=False, bold=False, center=False):
-        font = self.font(size, serif, bold)
-        if any("\u3000" <= char <= "\uffef" for char in text):
-            key = (size, "cjk", bold)
-            if key not in self.fonts:
-                path = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts" / "msyh.ttc"
-                self.fonts[key] = pygame.font.Font(str(path), size) if path.is_file() else font
-            font = self.fonts[key]
-        rendered = font.render(text, True, color)
+        native_size = max(1, round(size * self.render_scale))
+        image_key = (text, native_size, tuple(pygame.Color(color)), serif, bold)
+        rendered = self.text_images.get(image_key)
+        if rendered is None:
+            font = self.font(native_size, serif, bold)
+            if any("\u3000" <= char <= "\uffef" for char in text):
+                key = (native_size, "cjk", bold)
+                if key not in self.fonts:
+                    path = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts" / "msyh.ttc"
+                    self.fonts[key] = pygame.font.Font(str(path), native_size) if path.is_file() else font
+                font = self.fonts[key]
+            rendered = font.render(text, True, color)
+            if len(self.text_images) >= 256:
+                self.text_images.pop(next(iter(self.text_images)))
+            self.text_images[image_key] = rendered
         rect = rendered.get_rect()
         if center:
-            rect.center = (x, y)
+            rect.center = pixel_point(self.canvas, (x, y))
         else:
-            rect.topleft = (x, y)
+            rect.topleft = pixel_point(self.canvas, (x, y))
         self.canvas.blit(rendered, rect)
+
+    def specimen(self, rect, scene_id, accent, found=True):
+        area = pixel_rect(self.canvas, rect)
+        key = (scene_id, tuple(pygame.Color(accent)), found, area.size)
+        if key not in self.specimen_images:
+            image = pygame.Surface(area.size, pygame.SRCALPHA)
+            draw_specimen(image, image.get_rect(), scene_id, accent, found)
+            self.specimen_images[key] = image
+        self.canvas.blit(self.specimen_images[key], area.topleft)
 
     def panel(self, rect, fill, radius=14):
         """Reuse a soft shadow; the decorative surface never changes a hitbox."""
         rect = pygame.Rect(rect)
         key = (rect.width, rect.height, radius)
         if key not in self.panel_shadows:
-            shadow = pygame.Surface((rect.width + 20, rect.height + 20), pygame.SRCALPHA)
+            shadow = make_surface((rect.width + 20, rect.height + 20), pygame.SRCALPHA, self.render_scale)
             for pad, offset, alpha in ((9, 2, 3), (5, 4, 5), (2, 6, 9)):
-                pygame.draw.rect(shadow, (28, 67, 46, alpha),
+                draw.rect(shadow, (0, 8, 15, alpha * 4),
                                  (10 - pad, 4 + offset, rect.width + pad * 2, rect.height + pad),
                                  border_radius=radius + pad)
             self.panel_shadows[key] = shadow
-        self.canvas.blit(self.panel_shadows[key], (rect.x - 10, rect.y - 6))
-        pygame.draw.rect(self.canvas, fill, rect, border_radius=radius)
-        pygame.draw.rect(self.canvas, LINE, rect, 1, border_radius=radius)
+        self.canvas.blit(self.panel_shadows[key], pixel_point(self.canvas, (rect.x - 10, rect.y - 6)))
+        area = pixel_rect(self.canvas, rect)
+        self.canvas.blit(material(area.size, fill, round(radius * self.render_scale)), area.topleft)
+        draw.rect(self.canvas, LINE, rect, 1, border_radius=radius)
         color = pygame.Color(fill)
-        highlight = tuple(round(value * 0.45 + 255 * 0.55) for value in color[:3])
-        pygame.draw.line(self.canvas, highlight, (rect.x + radius, rect.y + 1),
+        highlight = tuple(min(255, value + 27) for value in color[:3])
+        draw.line(self.canvas, highlight, (rect.x + radius, rect.y + 1),
                          (rect.right - radius, rect.y + 1))
 
     def button(self, key, rect, label, active=False, primary=False, disabled=False, size=16):
         rect = pygame.Rect(rect)
         if not disabled:
             self.buttons[key] = rect
-        color = "#879E8D" if disabled else INK
-        fill = "#DFE8DD" if disabled and (primary or active) else color if primary or active else PAPER
-        pygame.draw.rect(self.canvas, fill, rect, border_radius=9)
-        pygame.draw.rect(self.canvas, color, rect, 1, border_radius=9)
+        color = "#758586" if disabled else GOLD if active or primary else "#8A9C98"
+        fill = "#17252C" if disabled else "#28413E" if primary or active else "#13262D"
+        if not disabled and not primary and not active and rect.collidepoint(self.pointer):
+            fill = "#2A4044"
+            color = GOLD
+        area = pixel_rect(self.canvas, rect)
+        self.canvas.blit(material(area.size, fill, round(9 * self.render_scale)), area.topleft)
+        draw.rect(self.canvas, color, rect, 1, border_radius=9)
         self.text(label, rect.centerx, rect.centery - 1, size,
-                  color if disabled else PAPER if primary or active else color,
+                  color if disabled else INK,
                   center=True, bold=primary)
 
     def draw_slider(self, key, color, disabled=False):
-        color = "#A8B0A4" if disabled else color
+        color = "#53696C" if disabled else color
         rect = next(rect for item, rect in self.sliders if item == key)
         x = round(rect.left + rect.width * self.slider_value(key))
-        pygame.draw.line(self.canvas, "#C4D3C6", (rect.left, rect.centery),
+        draw.line(self.canvas, "#09171E", (rect.left, rect.centery + 1),
+                         (rect.right, rect.centery + 1), 7)
+        draw.line(self.canvas, "#46575D", (rect.left, rect.centery),
                          (rect.right, rect.centery), 4)
         if x > rect.left:
-            pygame.draw.line(self.canvas, color, (rect.left, rect.centery), (x, rect.centery), 4)
-        pygame.draw.circle(self.canvas, "#DDE7DD" if disabled else PAPER, (x, rect.centery), 10)
-        pygame.draw.circle(self.canvas, color, (x, rect.centery), 10, 2)
+            draw.line(self.canvas, color, (rect.left, rect.centery), (x, rect.centery), 4)
+        draw.circle(self.canvas, "#07141A", (x, rect.centery + 2), 11)
+        draw.circle(self.canvas, "#223239" if disabled else "#C6B688", (x, rect.centery), 10)
+        draw.circle(self.canvas, color if disabled else "#F1DFB0", (x, rect.centery), 9, 1)
         if disabled:
-            pygame.draw.line(self.canvas, color, (x - 3, rect.centery), (x + 3, rect.centery), 2)
+            draw.line(self.canvas, color, (x - 3, rect.centery), (x + 3, rect.centery), 2)
         else:
-            pygame.draw.circle(self.canvas, color, (x, rect.centery), 3)
+            draw.circle(self.canvas, "#E5D7B2", (x - 1, rect.centery - 2), 6)
 
     def wrapped_text(self, message, x, y, width, size=14, color=INK, line_height=21):
         line = ""
@@ -714,15 +847,139 @@ class Lab:
             self.text(line, x, y, size, color)
         return y + line_height
 
+    def draw_transport(self, phase, audible):
+        """Keep the one Play/Stop control next to the instrument, above any letter."""
+        x, y, width, height = PLAY_RECT
+        self.buttons[("play", 0)] = PLAY_RECT
+        fill = "#E8CF91" if PLAY_RECT.collidepoint(self.pointer) else "#CEB37B"
+        area = pixel_rect(self.canvas, PLAY_RECT)
+        self.canvas.blit(material(area.size, fill, round(15 * self.render_scale)), area.topleft)
+        draw.rect(self.canvas, "#EBDCAB", PLAY_RECT, 1, border_radius=15)
+        draw.circle(self.canvas, "#8A734A", (x + 31, y + 26), 18, 1)
+        if self.playing:
+            draw.rect(self.canvas, DARK_INK, (x + 25, y + 20, 12, 12), border_radius=2)
+        else:
+            draw.polygon(self.canvas, DARK_INK, ((x + 27, y + 18), (x + 27, y + 34), (x + 39, y + 26)))
+        self.text("Stop listening" if self.playing else "Play your garden",
+                  x + 145, y + 26, 18, DARK_INK, bold=True, center=True)
+        if self.audio.focus is not None:
+            status = f"Only {NAMES[self.audio.focus]} / release for the mix"
+        elif not self.audio.available:
+            status = "Audio unavailable / Play to retry"
+        elif self.playing and self.ready_revision != self.revision:
+            status = "Preparing your latest phrase..."
+        elif audible:
+            status = "Listening / SPACE to stop"
+        elif self.mix.master == 0:
+            status = "MASTER is silent / raise it below"
+        else:
+            status = "Sound is off / SPACE also plays"
+        self.text(status, x, y + 60, 12, "#DCE6D2")
+        if self.letter_open:
+            return
+        slot = int(phase % SECONDS) if audible else None
+        self.text("FOUR BEATS", x, y + 81, 10, "#B5CBB7", bold=True)
+        for index, on in enumerate(self.mix.flower_steps):
+            center = (x + 161 + index * 27, y + 89)
+            draw.circle(self.canvas, "#E8D29C" if on else "#24473D", center, 5)
+            draw.circle(self.canvas, "#A6BFA6", center, 5, 1)
+            if slot == index:
+                draw.circle(self.canvas, "#F8EDCB", center, 9, 2)
+        for index, name in enumerate(NAMES):
+            rect = pygame.Rect(x + index * 87, y + 106, 80, 30)
+            self.buttons[("focus", index)] = rect
+            selected = self.audio.focus == index
+            hover = rect.collidepoint(self.pointer)
+            draw.rect(self.canvas, "#E8D29C" if selected else "#34584A" if hover else "#203F36",
+                      rect, border_radius=5)
+            draw.rect(self.canvas, "#B1C6AA", rect, 1, border_radius=5)
+            self.text(f"{'QWE'[index]}  {name}", rect.centerx, rect.centery, 13,
+                      DARK_INK if selected else "#E2EBD8", center=True, bold=selected)
+        self.text("HOLD a button or key to hear one layer", x, y + 144, 11, "#C9D9C2")
+
+    def draw_field_guide(self):
+        if self.guide_scene is None:
+            if self.lesson_hidden:
+                self.text("Four flowers. A phrase of your own.", 51, 180, 21, "#ECEDD8", serif=True)
+                self.text("Click a flower or use keys 1-4. Choose a specimen below for a listening clue.",
+                          51, 215, 14, "#CADBC2")
+                return
+            if not self.has_listened:
+                step, title = "01 / LISTEN", "This garden is an instrument."
+                detail = "Press Play, then tap a numbered flower. Each flower adds or rests one bell."
+            elif not self.flower_edits:
+                step, title = "02 / MAKE A PHRASE", "Make one beat yours."
+                detail = "Tap any numbered flower, or press 1-4. Hear the gap when a flower rests."
+            else:
+                step, title = "03 / FOLLOW YOUR CURIOSITY", "What else could grow here?"
+                detail = "Choose a specimen below. Follow its listening clue, then keep a garden you like."
+            draw.line(self.canvas, "#CEBE8C", (51, 181), (51, 257), 3)
+            self.text(step, 67, 179, 11, "#DBC797", bold=True)
+            self.text(title, 66, 201, 24, "#F4ECCC", serif=True)
+            self.wrapped_text(detail, 67, 239, 650, 14, "#D5E1CD", 20)
+            self.buttons[("lesson_close", 0)] = pygame.Rect(746, 176, 30, 30)
+            self.text("x", 761, 191, 17, "#B3C8AF", center=True)
+            return
+        scene = next(item for item in SCENES if item["id"] == self.guide_scene)
+        index = SCENES.index(scene)
+        note = FIELD_NOTES[self.guide_scene]
+        found = self.guide_scene in self.garden.discovered
+        x, y, width, height = GUIDE_RECT
+        self.panel(GUIDE_RECT, "#152C34", radius=8)
+        draw.line(self.canvas, scene["accent"], (x, y + 5), (x, y + height - 5), 3)
+        self.specimen((x + 10, y + 24, 67, 67), scene["id"], scene["accent"], found)
+        self.text(f"FIELD NOTE {index + 1:02d} / " + ("COLLECTED / TRY A VARIATION" if found else "FOLLOW A CLUE"),
+                  x + 92, y + 11, 10, MUTED, bold=True)
+        self.text(scene["title"] if found else note["title"], x + 91, y + 29, 21, INK, serif=True)
+        if self.guide_help == 2:
+            body = scene["hint"] + " Switch the needed sounds on; Bells need a lit flower."
+        elif self.guide_help == 1:
+            body = next_nudge(scene["id"], self.mix)
+        else:
+            body = note["after"] if found else note["clue"]
+        self.wrapped_text(body, x + 92, y + 62, width - 114, 14, INK, 19)
+        self.button(("guide_help", 0 if self.guide_help == 1 else 1), (x + 92, y + 108, 153, 27),
+                    "Back to the clue" if self.guide_help == 1 else "A gentle nudge", size=12)
+        self.button(("guide_recipe", 0 if self.guide_help == 2 else 2), (x + 255, y + 108, 151, 27),
+                    "Hide the recipe" if self.guide_help == 2 else "Show exact recipe", size=12)
+        self.text("No wrong turns. Explore at your pace.", x + 422, y + 114, 11, MUTED)
+        self.buttons[("guide_close", 0)] = pygame.Rect(x + width - 33, y + 6, 27, 27)
+        self.text("x", x + width - 19, y + 19, 16, MUTED, center=True)
+
+    def draw_flower_labels(self):
+        for index, target in enumerate(flower_targets(GARDEN_RECT, self.mix)):
+            available = self.character_available(2)
+            on = self.mix.flower_steps[index] and available
+            rect = pygame.Rect(target.centerx - 29, target.bottom - 22, 58, 20)
+            draw.rect(self.canvas, "#E1D6AA" if on else "#1B3D32", rect, border_radius=6)
+            draw.rect(self.canvas, "#B4C5A2", rect, 1, border_radius=6)
+            self.text("MUTED" if not available else "RING" if on else "REST", rect.centerx, rect.centery, 10,
+                      DARK_INK if on else "#D2DFC5", bold=True, center=True)
+
+    def update_cursor(self):
+        buttons = (rect for key, rect in self.buttons.items()
+                   if (not self.naming or key[0] in ("confirm_name", "cancel_name"))
+                   and (not (self.letter_open and VISITOR_RECT.collidepoint(self.pointer))
+                        or key[0] in ("letter_close", "wish", "next_wish", "wish_help")))
+        interactive = any(rect.collidepoint(self.pointer) for rect in buttons)
+        if not self.naming and not (self.letter_open and VISITOR_RECT.collidepoint(self.pointer)):
+            interactive |= any(rect.inflate(12, 20).collidepoint(self.pointer) for _, rect in self.sliders)
+            interactive |= any(rect.collidepoint(self.pointer) for rect in flower_targets(GARDEN_RECT, self.mix))
+        kind = pygame.SYSTEM_CURSOR_HAND if interactive else pygame.SYSTEM_CURSOR_ARROW
+        if kind != self.cursor_kind:
+            self.cursor_kind = kind
+            try:
+                pygame.mouse.set_cursor(kind)
+            except pygame.error:
+                pass  # Dummy SDL devices do not provide system cursors.
+
     def draw_ingredient(self, index, now):
         x = 28 + index * 414
         on = self.mix.enabled[index]
         available = self.character_available(index)
         color = COLORS[index] if on else MUTED
         # One workbench, with consistent controls and three small botanical marks.
-        if index:
-            pygame.draw.line(self.canvas, LINE, (x - 8, 568), (x - 8, 715))
-        draw_specimen(self.canvas, (x + 13, 563, 31, 31),
+        self.specimen((x + 13, 563, 31, 31),
                       ("rainy-moss", "moonlit-roots", "dawn-chorus")[index], color, on)
         self.text(NAMES[index], x + 51, 560, 25, INK, serif=True)
         description = (("Rain nourishes the moss", "Bass wakes the roots",
@@ -730,8 +987,9 @@ class Lab:
                        f"Off: switch {NAMES[index]} on to hear it." if not on else
                        f"Muted: raise LEVEL to hear {NAMES[index]}.")
         self.text(description, x + 20, 596, 11, MUTED if available else INK)
-        self.button(("toggle", index), (x + 320, 565, 56, 26),
+        self.button(("toggle", index), (x + 310, 565, 66, 26),
                     "ON" if on else "OFF", active=on, size=13)
+        draw.circle(self.canvas, color if on else "#455C62", (x + 319, 578), 3)
         self.text("VOLUME / LEVEL", x + 20, 616, 10, MUTED, bold=True)
         level = self.mix.levels[index]
         reading = "<1%" if level > 0 and round(level * 100) == 0 else f"{round(level * 100)}%"
@@ -744,7 +1002,7 @@ class Lab:
                    NOTE_NAMES[round(value * 6)] if index == 1 else
                    f"{round(value * 100)}% glow")
         if not available:
-            pygame.draw.rect(self.canvas, "#E1E9DD", (x + 12, 670, 372, 51), border_radius=5)
+            draw.rect(self.canvas, "#111E27", (x + 12, 670, 372, 51), border_radius=5)
             reading = "DISABLED"
         self.text(CHARACTER_NAMES[index].upper(), x + 20, 674, 10, MUTED, bold=True)
         self.text(reading, x + 376 - self.font(13).size(reading)[0], 671, 13,
@@ -762,11 +1020,11 @@ class Lab:
         if not self.letter_open:
             return
         x, y, width, height = VISITOR_RECT
-        self.panel(VISITOR_RECT, "#F6F4E6", radius=4)
+        self.panel(VISITOR_RECT, "#1C3037", radius=9)
         # A folded sheet is a letter, rather than another permanent dashboard card.
-        pygame.draw.polygon(self.canvas, "#D9E1D1",
+        draw.polygon(self.canvas, "#576258",
                             [(x + width - 22, y), (x + width - 22, y + 22), (x + width, y + 22)])
-        pygame.draw.line(self.canvas, LINE, (x + 18, y + 72), (x + width - 18, y + 72))
+        draw.line(self.canvas, LINE, (x + 18, y + 72), (x + width - 18, y + 72))
         wish = WISHES[self.wish_index]
         done = wish["id"] in self.garden.completed
         active = self.active_wish == wish["id"]
@@ -778,16 +1036,16 @@ class Lab:
         self.text("x", x + width - 32, y + 21, 15, MUTED, center=True)
         self.wrapped_text(wish["text"], x + 18, y + 88, width - 36, 14, line_height=20)
         if done:
-            pygame.draw.circle(self.canvas, COLORS[0], (x + width - 37, y + 158), 16, 2)
-            pygame.draw.lines(self.canvas, COLORS[0], False,
+            draw.circle(self.canvas, COLORS[0], (x + width - 37, y + 158), 16, 2)
+            draw.lines(self.canvas, COLORS[0], False,
                               [(x + width - 45, y + 158), (x + width - 39, y + 164),
                                (x + width - 29, y + 151)], 2)
         if rejected:
             elapsed = max(0, time.monotonic() - self.wish_error_at)
             pulse = max(0, 1 - elapsed / 0.9) * (0.5 + 0.5 * math.cos(elapsed * math.tau * 2 / 0.9))
-            pygame.draw.rect(self.canvas, COLORS[1], VISITOR_RECT,
+            draw.rect(self.canvas, COLORS[1], VISITOR_RECT,
                              2 + round(3 * pulse), border_radius=4)
-            pygame.draw.rect(self.canvas, "#F4E1D1", (x + 11, y + 149, width - 22, 94), border_radius=4)
+            draw.rect(self.canvas, "#3B3030", (x + 11, y + 149, width - 22, 94), border_radius=4)
             gaps = self.garden.wish_gaps(wish["id"], self.mix)
             self.text(f"NOT QUITE YET / {len(gaps)} TO ADJUST", x + 18, y + 158, 10, COLORS[1], bold=True)
             self.wrapped_text(gaps[0], x + 18, y + 179, width - 36, 13, INK, 18)
@@ -797,9 +1055,12 @@ class Lab:
                       "YOUR INVITATION" if active else "NO TIMER. TAKE YOUR TIME.",
                       x + 18, y + 158, 10, COLORS[0] if done else MUTED, bold=True)
             self.wrapped_text("A little place made someone happy. Keep exploring!" if done else
-                              wish["hint"] if active else
+                              (wish["hint"] if self.wish_help else FIELD_NOTES[wish["scene"]]["wish"]) if active else
                               "Open this invitation for a gentle hint. Or keep exploring on your own.",
                               x + 18, y + 181, width - 36, 13, MUTED, 18)
+            if active and not done:
+                self.button(("wish_help", 0), (x + 18, y + 229, 172, 24),
+                            "Hide recipe numbers" if self.wish_help else "Need recipe numbers?", size=11)
         self.button(("wish", 0), (x + 18, y + 260, 172, 36),
                     "Thank you!" if done else "Share this garden" if active else "Open invitation",
                     primary=active, disabled=done, size=14)
@@ -816,7 +1077,7 @@ class Lab:
                     active=self.collection_tab == "cards", size=14)
         self.text("FIELD NOTES  /  this visit only", 417, 751, 11, MUTED)
         if self.collection_tab == "guide":
-            self.text("Choose a specimen for a growing hint.", 997, 751, 11, MUTED)
+            self.text("Choose a specimen. Follow a listening clue.", 965, 751, 12, INK)
             now = time.monotonic()
             for index, scene in enumerate(SCENES):
                 rect = pygame.Rect(28 + index * 153, 783, 145, 91)
@@ -824,16 +1085,20 @@ class Lab:
                 age = now - self.discovery_highlights.get(scene["id"], -100)
                 recent = found and age < 10
                 self.buttons[("guide", index)] = rect
-                pygame.draw.rect(self.canvas, "#E7F0E1" if found else "#F0F4E9", rect, border_radius=3)
-                pygame.draw.line(self.canvas, LINE, rect.bottomleft, rect.bottomright)
+                hovered = rect.collidepoint(self.pointer)
+                if hovered or found:
+                    draw.rect(self.canvas, "#263A3D" if hovered else "#172C32", rect, border_radius=8)
+                draw.line(self.canvas, GOLD if found else LINE, rect.bottomleft, rect.bottomright)
+                if scene["id"] == self.guide_scene:
+                    draw.rect(self.canvas, scene["accent"], rect, 2, border_radius=3)
                 self.text(f"{index + 1:02d}", rect.x + 8, rect.y + 7, 9, MUTED)
-                draw_specimen(self.canvas, (rect.x + 45, rect.y + 3, 57, 57),
+                self.specimen((rect.x + 29, rect.y + 1, 87, 66),
                               scene["id"], scene["accent"], found)
                 if recent:
                     self.text("NEW", rect.right - 28, rect.y + 7, 9, scene["accent"], bold=True)
                     if age < 4.5:
-                        pygame.draw.rect(self.canvas, scene["accent"], rect, 2, border_radius=3)
-                self.text(scene["title"] if found else "Unobserved", rect.centerx, rect.y + 70,
+                        draw.rect(self.canvas, scene["accent"], rect, 2, border_radius=3)
+                self.text(scene["title"] if found else "Explore this", rect.centerx, rect.y + 70,
                           12, INK if found else MUTED, center=True, bold=found)
         else:
             pages = max(1, (len(self.garden.cards) + 3) // 4)
@@ -847,13 +1112,13 @@ class Lab:
             for index, card in enumerate(cards):
                 rect = pygame.Rect(28 + index * 309, 783, 297, 91)
                 self.buttons[("restore", card["id"])] = rect
-                pygame.draw.rect(self.canvas, "#E7F0E1", rect, border_radius=3)
+                self.panel(rect, "#182E35", radius=8)
                 if card["id"] not in self.garden_thumbnails:
                     # Render the saved recipe, never the current sliders or a generic icon.
-                    thumbnail = pygame.Surface((104, 66))
+                    thumbnail = make_surface((104, 66), ratio=self.render_scale)
                     draw_garden(thumbnail, thumbnail.get_rect(), self.garden.restore(card["id"]), 1.25)
                     self.garden_thumbnails[card["id"]] = thumbnail
-                self.canvas.blit(self.garden_thumbnails[card["id"]], (rect.x + 9, rect.y + 10))
+                self.canvas.blit(self.garden_thumbnails[card["id"]], pixel_point(self.canvas, (rect.x + 9, rect.y + 10)))
                 name = card["name"]
                 limit = 10 if any(ord(c) > 255 for c in name) else 23
                 while len(name) > 1 and (self.font(15, serif=True).size(name + "...")[0] > 163
@@ -870,35 +1135,33 @@ class Lab:
         index, scene = next((index, item) for index, item in enumerate(SCENES)
                             if item["id"] == self.discovery_current)
         elapsed = max(0, now - self.discovery_started)
-        draw_discovery_effect(self.canvas, GARDEN_RECT, scene["accent"], elapsed)
+        draw_discovery_effect(self.canvas, pixel_rect(self.canvas, GARDEN_RECT), scene["accent"], elapsed)
         end = (100 + index * 153, 818) if self.collection_tab == "guide" else (119, 759)
-        draw_collection_flight(self.canvas, (650, 423), end,
-                               scene["id"], scene["accent"], elapsed)
-        x, y = 48, 421 + round(8 * max(0, 1 - elapsed / 0.25))
-        pygame.draw.rect(self.canvas, "#0E2924", (x + 3, y + 4, 358, 76), border_radius=3)
-        pygame.draw.rect(self.canvas, "#F4F5E7", (x, y, 358, 76), border_radius=3)
-        pygame.draw.line(self.canvas, scene["accent"], (x, y), (x, y + 76), 3)
-        draw_specimen(self.canvas, (x + 8, y + 9, 54, 54), scene["id"], scene["accent"])
-        self.text(f"SPECIMEN {index + 1:02d} / COLLECTED", x + 72, y + 10, 10, scene["accent"], bold=True)
-        self.text(scene["title"], x + 71, y + 27, 22, INK, serif=True)
-        self.text("Filed in your field notes.", x + 72, y + 55, 11, MUTED)
-        self.buttons[("discovery_view", 0)] = pygame.Rect(x + 258, y + 51, 86, 22)
-        self.text("View specimen", x + 261, y + 55, 11, scene["accent"], bold=True)
-        self.buttons[("discovery_close", 0)] = pygame.Rect(x + 328, y + 5, 25, 25)
-        self.text("x", x + 340, y + 17, 15, MUTED, center=True)
+        draw_collection_flight(self.canvas, pixel_point(self.canvas, (650, 423)),
+                               pixel_point(self.canvas, end), scene["id"], scene["accent"], elapsed,
+                               pixel_ratio=self.render_scale)
+        x, y, width, height = DISCOVERY_RECT
+        self.panel(DISCOVERY_RECT, "#22393E", radius=8)
+        draw.line(self.canvas, scene["accent"], (x, y + 4), (x, y + height - 4), 3)
+        self.specimen((x + 6, y + 3, 51, 51), scene["id"], scene["accent"])
+        self.text(f"SPECIMEN {index + 1:02d} / COLLECTED", x + 65, y + 8, 10, scene["accent"], bold=True)
+        self.text(scene["title"], x + 64, y + 25, 21, INK, serif=True)
+        self.button(("discovery_view", 0), (x + 345, y + 15, 119, 30), "View specimen", size=12)
+        self.buttons[("discovery_close", 0)] = pygame.Rect(x + width - 32, y + 5, 25, 25)
+        self.text("x", x + width - 20, y + 17, 15, MUTED, center=True)
 
     def draw_name_dialog(self):
-        shade = pygame.Surface(SIZE, pygame.SRCALPHA)
+        shade = make_surface(SIZE, pygame.SRCALPHA, self.render_scale)
         shade.fill((21, 40, 34, 160))
         self.canvas.blit(shade, (0, 0))
         self.buttons = {}
-        pygame.draw.rect(self.canvas, PAPER, (330, 292, 620, 294), border_radius=18)
+        self.panel((330, 292, 620, 294), "#1B3038", radius=18)
         self.text("Keep this little world.", 361, 316, 30, serif=True)
         self.text("Keep it for this visit. Closing the window clears kept gardens.", 362, 365, 15, MUTED)
-        pygame.draw.rect(self.canvas, "#FFFFFF", (361, 401, 558, 48), border_radius=7)
-        pygame.draw.rect(self.canvas, COLORS[0], (361, 401, 558, 48), 2, border_radius=7)
+        draw.rect(self.canvas, "#0D2029", (361, 401, 558, 48), border_radius=7)
+        draw.rect(self.canvas, COLORS[0], (361, 401, 558, 48), 2, border_radius=7)
         if self.name_selected:
-            pygame.draw.rect(self.canvas, "#D9E9E4", (370, 410, 540, 30), border_radius=3)
+            draw.rect(self.canvas, "#345957", (370, 410, 540, 30), border_radius=3)
         visible_name = ("" if self.name_selected and self.composition else self.garden_name) + self.composition
         self.text(visible_name + ("|" if int(time.monotonic() * 2) % 2 else ""),
                   376, 410, 18)
@@ -909,6 +1172,32 @@ class Lab:
 
     def draw(self):
         now = time.monotonic()
+        area, scale = viewport(self.screen.get_size(), SIZE)
+        if (self.surround is None or self.surround.get_size() != self.screen.get_size()
+                or self.surround_area != area):
+            self.surround = create_surround(self.screen.get_size(), area)
+            self.surround_area = area.copy()
+        if self.canvas.get_size() != area.size or self.render_scale != scale:
+            self.render_scale = scale
+            self.canvas = make_surface(SIZE, ratio=scale)
+            self.background = create_background(self.canvas.get_size())
+            self.console_ready = False
+            self.panel_shadows.clear()
+            self.garden_thumbnails.clear()
+            self.fonts.clear()
+            self.text_images.clear()
+            self.specimen_images.clear()
+            clear_art_caches()
+            if self.naming:
+                pygame.key.set_text_input_rect(self.name_input_rect())
+        if not self.console_ready:
+            # The three instrument cases are static. Bake their translucent
+            # edges into the native background once, rather than every frame.
+            self.canvas.blit(self.background, (0, 0))
+            for index in range(3):
+                self.panel((28 + index * 414, 554, 396, 174), TINTS[index], radius=12)
+            self.background.blit(self.canvas, (0, 0))
+            self.console_ready = True
         self.canvas.blit(self.background, (0, 0))
         self.buttons = {}
         self.text("Sound garden.", 28, 12, 37, serif=True)
@@ -930,52 +1219,57 @@ class Lab:
         if not self.naming and not (self.letter_open and VISITOR_RECT.collidepoint(self.pointer)):
             hover = next((index for index, target in enumerate(flower_targets(GARDEN_RECT, self.mix))
                           if target.collidepoint(self.pointer)), None)
-        draw_garden(self.canvas, GARDEN_RECT, self.mix, phase, audible,
-                    rhythm_mix=rhythm_mix, flower_hover=hover)
-        pygame.draw.rect(self.canvas, "#52776A", GARDEN_RECT, 1, border_radius=18)
+        draw_garden(self.canvas, pixel_rect(self.canvas, GARDEN_RECT), self.mix, phase, audible,
+                    rhythm_mix=rhythm_mix, flower_hover=hover, listening_focus=self.audio.focus)
+        draw.rect(self.canvas, "#877B5C", GARDEN_RECT, 2, border_radius=18)
+        draw.rect(self.canvas, "#354E53", GARDEN_RECT.inflate(-6, -6), 1, border_radius=16)
         scene = next((item for item in SCENES if item["id"] == scene_for(self.mix)), None)
         self.text("YOUR LIVING GARDEN", 51, 106, 10, "#D7E7D8", bold=True)
         self.text(scene["title"] if scene else "A wild little world", 50, 123, 28, "#F3F0DC", serif=True)
-        self.text("YOUR MELODY / CLICK FLOWERS 1-4 TO ADD OR REMOVE A NOTE", 51, 165, 11, "#C6D8B9")
-        self.text("LISTENING / WATCH THE FLOWERS FOLLOW THE BELLS" if audible else
-                  "PREPARING SOUND / VISUAL PREVIEW" if self.playing else
-                  "SILENT PREVIEW / PRESS PLAY TO LISTEN", 51, 511, 10, "#D7E7D8")
-        self.button(("keep", 0), (1065, 482, 165, 36), "Keep garden", primary=True, size=14)
-        pygame.draw.rect(self.canvas, "#F0F5E9", (28, 554, 1224, 174), border_radius=5)
-        pygame.draw.line(self.canvas, LINE, (28, 554), (1252, 554))
-        pygame.draw.line(self.canvas, LINE, (28, 728), (1252, 728))
+        self.draw_transport(phase, audible)
+        self.draw_field_guide()
+        self.draw_flower_labels()
+        if hover is not None:
+            instruction = (f"Flower {hover + 1}: click to rest this note." if self.mix.flower_steps[hover]
+                           else f"Flower {hover + 1}: click to add a bell.")
+            if not self.character_available(2):
+                instruction = "Switch Bells ON and raise its LEVEL to play the flowers."
+        elif self.guide_scene is not None:
+            instruction = FIELD_NOTES[self.guide_scene]["listen"]
+        else:
+            instruction = "Each numbered flower is one beat. Light a flower to ring; close it to leave a rest."
+        self.text(instruction, 51, 507, 13, "#DFE8D1")
+        if not self.letter_open:
+            self.button(("keep", 0), (1065, 482, 165, 36), "Keep garden", primary=True, size=14)
         for index in range(3):
             self.draw_ingredient(index, now)
         self.draw_collection()
-        pygame.draw.line(self.canvas, LINE, (28, 885), (1252, 885))
-        self.button(("play", 0), (28, 894, 170, 40),
-                    "Stop listening" if self.playing else "Play your mix", primary=True, size=15)
-        self.button(("reset", 0), (210, 894, 92, 40), "Reset", size=14)
+        draw.line(self.canvas, LINE, (28, 885), (1252, 885))
+        self.button(("reset", 0), (28, 894, 100, 40), "Reset sounds", size=13)
+        self.text("SPACE  play / stop", 145, 898, 12, INK)
+        self.text("1-4  play the flowers", 145, 916, 12, MUTED)
         self.text("MASTER", 355, 890, 9, MUTED, bold=True)
         self.text(f"{round(self.mix.master * 100)}%", 522, 890, 11, INK)
-        self.draw_slider(("master", 0), INK)
+        self.draw_slider(("master", 0), COLORS[0])
         pending = self.ready_revision != self.revision
-        status = "Preparing your sounds..." if pending else "Listening to a 4-second loop" if self.playing else "Ready when you are"
-        if not self.audio.available:
-            status = "Audio unavailable / Play to retry"
-        self.text(status, 604, 904, 12, MUTED)
+        self.text("LISTENING CLOSELY" if self.audio.focus is not None else "YOUR SOUND BALANCE",
+                  604, 895, 10, MUTED, bold=True)
+        observation = (f"Only {NAMES[self.audio.focus]}. Release to bring your full garden back."
+                       if self.audio.focus is not None else listening_observation(self.mix))
+        self.wrapped_text(observation, 604, 912, 470, 12, INK, 16)
         self.button(("tools", 0), (1110, 894, 142, 40), "Tools & export", active=self.tools_open, size=14)
         self.text(self.message, 29, 941, 12, MUTED)
         self.draw_discovery(now)
         self.draw_visitor()
         if self.tools_open:
-            self.panel(TOOLS_RECT, "#F6F4E6", radius=4)
+            self.panel(TOOLS_RECT, "#1C3037", radius=8)
             self.button(("save", 0), (966, 790, 268, 36), "Save 8-second WAV", disabled=pending, size=14)
             self.button(("folder", 0), (966, 834, 268, 30), "Open exports", disabled=self.last_saved is None, size=14)
         if self.naming:
             self.draw_name_dialog()
-        width, height = self.screen.get_size()
-        scale = min(width / SIZE[0], height / SIZE[1])
-        scaled = pygame.transform.smoothscale(self.canvas,
-                                              (round(SIZE[0] * scale), round(SIZE[1] * scale)))
-        self.screen.fill(PAPER)
-        self.screen.blit(scaled, ((width - scaled.get_width()) // 2,
-                                  (height - scaled.get_height()) // 2))
+        self.update_cursor()
+        self.screen.blit(self.surround, (0, 0))
+        self.screen.blit(self.canvas, area.topleft)
         pygame.display.flip()
 
     def run(self):

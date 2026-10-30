@@ -727,6 +727,24 @@ class InteractionTests(unittest.TestCase):
         self.assertEqual(self.lab.audio.sounds[self.lab.audio.bell_channel].get_raw(),
                          data[offset:] + data[:offset])
 
+    def test_crossing_loop_boundaries_does_not_restart_running_channels(self):
+        from sound import SECONDS
+        self.click(("play", 0))
+        origin = self.lab.play_origin
+        channels = [pygame.mixer.Channel(self.lab.audio.bank * 3 + index)
+                    for index in (0, 1)]
+        sounds = [channel.get_sound() for channel in channels]
+        with patch.object(self.lab.audio, "play", wraps=self.lab.audio.play) as restart:
+            for elapsed in (SECONDS - 0.01, SECONDS + 0.01, 2 * SECONDS + 0.01,
+                            3 * SECONDS + 0.01):
+                with patch("app.time.monotonic", return_value=origin + elapsed):
+                    self.lab.update()
+                self.assertEqual(self.lab.play_origin, origin)
+                for channel, sound in zip(channels, sounds):
+                    self.assertTrue(channel.get_busy())
+                    self.assertIs(channel.get_sound(), sound)
+            restart.assert_not_called()
+
     def test_rapid_flower_edits_and_volume_changes_accept_only_the_latest_pattern(self):
         self.click(("play", 0))
         origin = self.lab.play_origin

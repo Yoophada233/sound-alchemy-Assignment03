@@ -1,12 +1,13 @@
-"""Eight small ink-and-wash specimens and their journey into the notebook.
+"""Eight glass botanical specimens and their journey onto the shelf.
 
-All shapes use a 100-unit drawing space. No image files, fonts or random state
-are needed, so the same specimen works on a card or in an enlarged study.
+Local sprites have procedural fallbacks in a 100-unit drawing space. The same
+specimen fits a small card or an enlarged study without changing its identity.
 """
 
 import math
 
 import pygame
+from artwork import SPECIMENS, paint_sprite
 
 
 INK = (44, 75, 61)
@@ -274,21 +275,24 @@ def draw_specimen(surface, rect, scene_id, accent, found=True):
     previous_clip = surface.get_clip()
     surface.set_clip(previous_clip.clip(rect))
     try:
+        if scene_id in SPECIMENS and paint_sprite(surface, rect, "specimens",
+                                                  SPECIMENS.index(scene_id), dim=not found):
+            return
         motif(Pen(surface, rect, accent, found))
     finally:
         surface.set_clip(previous_clip)
 
 
-def flight_point(start, end, progress):
+def flight_point(start, end, progress, pixel_ratio=1):
     """A high, gentle arc connects the living garden to its collected study."""
     control = ((start[0] + end[0]) * 0.5,
-               min(start[1], end[1]) - min(150, 45 + abs(end[0] - start[0]) * 0.17))
+               min(start[1], end[1]) - min(150 * pixel_ratio, 45 * pixel_ratio + abs(end[0] - start[0]) * 0.17))
     t = max(0, min(1, progress))
     return ((1 - t) ** 2 * start[0] + 2 * (1 - t) * t * control[0] + t ** 2 * end[0],
             (1 - t) ** 2 * start[1] + 2 * (1 - t) * t * control[1] + t ** 2 * end[1])
 
 
-def draw_collection_flight(surface, start, end, scene_id, accent, elapsed):
+def draw_collection_flight(surface, start, end, scene_id, accent, elapsed, pixel_ratio=1):
     """Send one petal to the notebook and finish with a small stamped ring.
 
     The caller owns the clock and queue. This deterministic 1.35-second effect
@@ -305,15 +309,15 @@ def draw_collection_flight(surface, start, end, scene_id, accent, elapsed):
             trail = max(0, progress - mote * 0.045)
             if trail <= 0:
                 continue
-            position = flight_point(start, end, trail)
+            position = flight_point(start, end, trail, pixel_ratio)
             color = blend(accent, PAPER, 0.24 + mote * 0.11)
             pygame.draw.circle(surface, color, (round(position[0]), round(position[1])),
-                               max(1, 4 - mote // 2))
-        x, y = flight_point(start, end, progress)
-        previous = flight_point(start, end, max(0, progress - 0.012))
+                               max(1, round((4 - mote // 2) * pixel_ratio)))
+        x, y = flight_point(start, end, progress, pixel_ratio)
+        previous = flight_point(start, end, max(0, progress - 0.012), pixel_ratio)
         angle = math.atan2(y - previous[1], x - previous[0])
-        radius = 8 if scene_id == "crystal-rain" else 10
-        local = ((-radius, 0), (0, -4), (radius, 0), (0, 4))
+        radius = (8 if scene_id == "crystal-rain" else 10) * pixel_ratio
+        local = ((-radius, 0), (0, -4 * pixel_ratio), (radius, 0), (0, 4 * pixel_ratio))
         points = [(round(x + px * math.cos(angle) - py * math.sin(angle)),
                    round(y + px * math.sin(angle) + py * math.cos(angle))) for px, py in local]
         pygame.draw.polygon(surface, blend(accent, PAPER, 0.35), points)
@@ -322,13 +326,13 @@ def draw_collection_flight(surface, start, end, scene_id, accent, elapsed):
     if elapsed >= 1.00:
         stamp = min(1, (elapsed - 1.00) / 0.35)
         center = (round(end[0]), round(end[1]))
-        radius = round(10 + 13 * stamp)
+        radius = round((10 + 13 * stamp) * pixel_ratio)
         color = blend(accent, PAPER, stamp * 0.82)
-        pygame.draw.circle(surface, color, center, radius, 1)
+        pygame.draw.circle(surface, color, center, radius, max(1, round(pixel_ratio)))
         if stamp < 0.7:
-            pygame.draw.circle(surface, color, center, max(1, radius - 4), 1)
+            pygame.draw.circle(surface, color, center, max(1, round(radius - 4 * pixel_ratio)), max(1, round(pixel_ratio)))
         for number in range(4):
             angle = number * math.pi / 2 + 0.5
-            point = (round(end[0] + math.cos(angle) * (radius + 5)),
-                     round(end[1] + math.sin(angle) * (radius + 5)))
-            pygame.draw.circle(surface, color, point, 1)
+            point = (round(end[0] + math.cos(angle) * (radius + 5 * pixel_ratio)),
+                     round(end[1] + math.sin(angle) * (radius + 5 * pixel_ratio)))
+            pygame.draw.circle(surface, color, point, max(1, round(pixel_ratio)))

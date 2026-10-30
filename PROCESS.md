@@ -37,3 +37,33 @@ Discoveries were another place where a response could be missed. I requested mor
 My manual checks focused on what I could see and hear. Codex ran the automated checks for sound generation, controls, recipe restoration and export, with details in [the verification record](docs/VERIFICATION.md). These checks and the scripted demonstrations help explain the implementation, but they do not establish that another person understands or enjoys it.
 
 ## User trial
+
+The following notes are based on my experience optimizing different versions during user testing.
+
+- [Simplified Playback Controls] Users noticed that the main playback button on the page already stopped the sound, so having a separate [Stop] button next to it seemed redundant. I subsequently removed the standalone Stop button and standardized the interface to a single Play/Stop button.
+
+- [Rain Sound Optimization] After multiple test listens, users felt the rain sounds resembled TV static; after modifications, they sounded like tapping on plastic. I subsequently provided a specific Minecraft rain sound video as a reference and readjusted the texture of the synthesized rain sounds.
+
+- [Gameplay Loop Enhancement] Users lost interest in the original mixer after about a minute, feeling that simply adjusting the sound wasn’t engaging enough. Subsequently, I added gameplay where sounds directly affect the garden and introduced visitor quests as optional objectives to lower the learning curve.
+
+- [Mute Status Indicator] Users reported not hearing rain sounds even when DROPS was set to maximum; upon inspection, I found that the “Rain” LEVEL was set to zero. We subsequently added prompts for the three sound effect sections and disabled the parameters below when the volume was set to zero or the app was closed to reduce confusion.
+
+- [Feedback on Invalid Recipes] When users discovered that a recipe did not meet the requirements, clicking “Share this garden” produced no obvious reaction, leading them to assume the app had crashed. We subsequently added a mail animation and specific adjustment prompts to let users know why the task was not completed.
+
+- [Reset on Each Session] When new users opened the app, all tasks and collectibles were already completed. We subsequently updated the app so that tasks, discoveries, and saved gardens reset upon reopening, ensuring each session starts from the beginning.
+
+- [Collectible Unlock Feedback] Users found that unlocked collectibles weren’t prominent enough and wanted more content to explore. We subsequently added unlock notifications and collectible animations, and expanded the number of discoverable gardens to eight.
+
+- [Background and Interface Style] Users felt that the early all-yellow background was unattractive, and later interfaces had a templated look. During adjustments, plants, mist, and a dark garden atmosphere were gradually added to make the background, controls, and collectibles better align with the theme.
+
+- [Screen Adaptation Optimization] Users noticed that text and the overall image appeared blurry on 2K screens, and this was even more pronounced on 4K screens. The original fixed-size interface lost clarity when scaled up, so we subsequently changed the system to render text and the interface based on the actual window resolution.
+
+- [Main Operation Guidance] Users wanted new players to discover more naturally that “tapping a flower changes the melody.” We subsequently moved the main play button into the scene and emphasized flower numbers, RING/REST statuses, and beat cues to make interactive elements more prominent.
+
+- [Collection and Exploration] Users want the collection process to feel more exploratory, rather than simply adjusting numbers based on a percentage. Moving forward, we’ll implement layered prompts: first providing auditory cues and scene-based clues, then expanding to more specific hints as needed to encourage users to listen and experiment.
+
+- [Scene Layering and Softening] Users want the art style to feel more immersive, while noting that the realistic elements are too grainy and overly sharpened. Future iterations will incorporate layers of distant mountains, forests, lake surfaces, and foreground vegetation, while softening the natural textures.
+
+- [Sound Loop Transitions] Users noted noticeable stuttering and abrupt transitions at the end of each loop for the Rain and Bass sounds. Future updates will refine the filtering transitions at the beginning and end of the rain sound to better align with the bass waveform, remove the fade-in/fade-out effects at the edges of each loop, and reduce the sense of interruption during repeated playback.
+
+- [Immersive Plant Borders] After comparing the actual interface with the previous design mockups, users expressed a desire for three-dimensional plant decorations along the page edges. We subsequently added branches, leaves, vines, and ferns with highlights and soft shadows, extending them into the white space on both sides of the widescreen layout.

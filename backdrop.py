@@ -1,8 +1,11 @@
-"""A quiet mist-and-leaf backdrop, rendered once for the garden window."""
+"""A dark, quiet botanical surround, rendered once at the window's density."""
 
 import math
 
 import pygame
+
+from foliage import frame, paint_surround
+from artwork import source
 
 
 def _fern(surface, start, tip, bend, color, scale):
@@ -67,28 +70,36 @@ def _leaf(surface, base, tip, breadth, color, scale):
                               base[1] + dy * next_t + ny * bow), width)
 
 
-def create_background(size):
-    """Return an opaque backdrop without display setup, files or random state.
-
-    The small colour field is smoothed up to the window size. Leaf drawings
-    stay near the margins so the middle remains calm beneath the controls.
-    """
+def mist(size, area=None):
+    """Anchor the soft colour field to the page, including any window gutters."""
     width, height = size
     if width <= 0 or height <= 0:
         raise ValueError("The background needs a positive width and height.")
+    area = pygame.Rect((0, 0), size) if area is None else area
     haze = pygame.Surface((80, 60))
-    top, bottom, light = (223, 235, 226), (234, 242, 234), (245, 249, 241)
+    top, bottom, light = (9, 23, 31), (8, 19, 25), (25, 47, 52)
     for y in range(60):
-        v = y / 59
+        v = (y / 59 * height - area.top) / area.height
+        v = max(0, min(1, v))
         base = [top[i] * (1 - v) + bottom[i] * v for i in range(3)]
         for x in range(80):
-            u = x / 79
+            u = (x / 79 * width - area.left) / area.width
             glow = .74 * math.exp(-((u - .49) / .48) ** 2
                                   - ((v - .24) / .70) ** 2)
             color = [round(base[i] * (1 - glow) + light[i] * glow)
                      for i in range(3)]
             haze.set_at((x, y), color)
-    background = pygame.transform.smoothscale(haze, size)
+    return pygame.transform.smoothscale(haze, size)
+
+
+def create_surround(size, area):
+    return paint_surround(mist(size, area), area)
+
+
+def create_background(size):
+    """Cache the native-size backdrop; missing foliage keeps the line drawings."""
+    width, height = size
+    background = mist(size)
     details = pygame.Surface(size, pygame.SRCALPHA)
     sx, sy = width / 1280, height / 900
     scale = min(sx, sy)
@@ -104,11 +115,11 @@ def create_background(size):
                                round((cy - radius) * sy),
                                max(1, round(radius * 2 * sx)),
                                max(1, round(radius * 2 * sy)))
-            pygame.draw.ellipse(details, (91, 135, 119, 19), rect,
+            pygame.draw.ellipse(details, (146, 146, 98, 12), rect,
                                 max(1, round(scale)))
 
     # Botanical edges leave the title, controls and central reading area clear.
-    fern_color = (77, 124, 105, 37)
+    fern_color = (119, 145, 115, 37)
     for start, tip, bend, fern_scale in (
             ((-8, 388), (21, 120), 14, 1.05),
             ((420, 104), (585, -33), 8, .87),
@@ -117,7 +128,7 @@ def create_background(size):
         _fern(details, point(*start), point(*tip), bend * sx,
               fern_color, fern_scale * scale)
 
-    leaf_color = (86, 134, 114, 27)
+    leaf_color = (155, 150, 106, 28)
     for base, tip, breadth in (
             ((1210, 106), (1292, -34), 31),
             ((1248, 920), (1162, 838), 22),
@@ -125,5 +136,8 @@ def create_background(size):
             ((-13, 766), (26, 644), 24)):
         _leaf(details, point(*base), point(*tip), breadth * scale,
               leaf_color, scale)
+    if source("foliage") is not None:
+        details.set_alpha(45)
     background.blit(details, (0, 0))
+    background.blit(frame(size), (0, 0))
     return background

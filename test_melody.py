@@ -4,13 +4,12 @@
 # ///
 """Check the four flower steps using the samples a listener actually hears."""
 
-import hashlib
 import itertools
 import unittest
 from unittest.mock import patch
 
 from sound import (FLOWER_NOTES, Mix, SAMPLE_RATE, SECONDS, bell_pattern,
-                   make_bass, make_bells, make_rain, pcm_bytes, render_layers,
+                   make_bells, render_layers,
                    render_mix, validate)
 
 
@@ -111,13 +110,13 @@ class MelodyTests(unittest.TestCase):
         regenerated = render_layers(mix, original, character)
         self.assertIsNot(regenerated[0], original[0])
 
-    def test_rain_and_bass_keep_their_pre_melody_audio_samples(self):
-        baseline = (
-            (make_rain(0.62), "ef41c660f62f17b56c052d7650205624fac040db1963efc28075d46db3d240a2"),
-            (make_bass(0), "fb6a4d27ebe5b0a6ae818d7d80ba5f4af34c1ac558fb44baefd83a7a1127275b"),
-        )
-        for samples, expected in baseline:
-            self.assertEqual(hashlib.sha256(pcm_bytes(samples)).hexdigest(), expected)
+    def test_flower_patterns_do_not_change_fresh_rain_or_bass_audio(self):
+        mix = Mix()
+        before = render_layers(mix)
+        mix.flower_steps = [False, True, False, True]
+        after = render_layers(mix)
+        self.assertEqual(before[:2], after[:2])
+        self.assertNotEqual(before[2], after[2])
 
 
 if __name__ == "__main__":

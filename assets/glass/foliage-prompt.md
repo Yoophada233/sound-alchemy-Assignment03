@@ -1,0 +1,14 @@
+# Edge foliage generation prompt
+
+Generated with the built-in ImageGen tool on 30 October 2026. The supplied images were visual references: the current running interface and the previously approved concept. The delivered PNG is 1254 x 1254 with alpha; requested image dimensions were guidance, not a guarantee.
+
+Use case: stylized-concept.
+Asset type: TRANSPARENT production foliage sprite atlas for the edges of an existing Python/Pygame Sound Garden UI, not a mockup.
+Input image 1 is the current working interface, a layout and palette reference only. Input image 2 is the approved design direction: reference ONLY its dimensional natural foreground leaves framing the outside of the page.
+Make ONE very high resolution square RGBA atlas, ideally 2048 x 2048 or larger, of FOUR independent botanical compositions in a strict 2 by 2 grid. Each contained in its own quadrant with wide transparent gutters, no contact between quadrants. Genuine transparent background, preserve alpha, not a checkerboard drawing.
+Top left quadrant: a slender natural climbing ivy vine, long upright curved stem with about 14 dark jade and olive glossy leaves, extending upward from the lower left, sparse branches reaching right. Clearly taller than wide; isolated full vine, no plant pot, no base.
+Top right quadrant: an airy hanging branch, curved dark wood travelling from upper right down toward lower left, with 9 broad folded oval forest-green leaves. Sculpted convex leaf faces, one or two turned backs, leaves separated by open transparent gaps. Wider than tall.
+Bottom left quadrant: a small dense grounded foreground cluster of three graceful fern fronds, a few broad waxy laurel leaves, dark moss and one small worn stone near the base; tallest frond bows right, lower foliage spreads horizontally.
+Bottom right quadrant: a sweeping natural twig with layered broad elliptical leaves, growing from lower right diagonally toward upper left. A closer foreground plant, thick softly curled dark green leaves, a few slender trailing tendrils, a little dark moss at the base, no flowers.
+Match the second reference's crafted 3D botanical miniature rendering: soft cool blue moonlight, controlled warm amber rim highlights, naturally shaded leaf undersides, depth through overlapping leaves and stem occlusion, rich deep jade/olive green with golden-green leaf edges. Restrained satin wet sheen, only a few tiny dew drops. Clean coherent silhouettes, smooth soft material detail, NO grain, noise, crunchy sharpening, harsh HDR or excessive glitter. Leaves should feel tangible and layered, not flat line art and not metallic/glass plants.
+Each composition fully visible with 8% transparent padding within its own cell, no clipping. Transparent gaps between stems/leaves. No ground plane or background shadow rectangle, no backdrop, no scenery, no UI, no text/numbers, no borders or frames, no gold filigree, no display bases, no flower blooms. Only the four separate plant assets.
